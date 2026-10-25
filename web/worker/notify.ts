@@ -94,10 +94,13 @@ function describeIncident({ incident }: { incident: Incident }) {
 
 export function payloadFor({
   kind,
+  before,
   match,
   scorers,
 }: {
   kind: MatchEventKind;
+  // The match before this change, for score events.
+  before?: Match;
   match: Match;
   // For score events: each scoring team's incidents, or null when unknown.
   scorers?: { team: "home" | "away"; incidents: Incident[] | null }[];
@@ -108,7 +111,11 @@ export function payloadFor({
   const base = { url: `/matches/${match.id}`, tag: match.id };
   switch (kind) {
     case "kickoff":
-      return { ...base, title: `${home.name} v ${away.name}`, body: `Kick-off · ${competition}` };
+      return {
+        ...base,
+        title: "Match Started",
+        body: `${home.name} v ${away.name} · ${competition}`,
+      };
     case "half-time":
       return { ...base, title: score, body: "Half-time" };
     case "full-time": {
@@ -126,6 +133,11 @@ export function payloadFor({
           ? incidents.map((incident) => describeIncident({ incident })).join(", ")
           : `${match[team].name} score`,
       );
+      // World Rugby sometimes takes points back (a mistaken entry, or a try overturned).
+      const corrected =
+        before &&
+        (["home", "away"] as const).some((team) => match[team].score < before[team].score);
+      if (corrected) lines.push("Score corrected");
       return { ...base, title: score, body: lines.join(" · ") || "Score update" };
     }
   }

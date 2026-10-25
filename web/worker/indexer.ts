@@ -327,7 +327,7 @@ export class Indexer extends DurableObject<Env> {
     const scorers = kind === "score" ? await this.scorers({ before, after }) : undefined;
     const results = await sendPushes({
       subscriptions,
-      payload: payloadFor({ kind, match: after, scorers }),
+      payload: payloadFor({ kind, before, match: after, scorers }),
       privateJWK: this.env.VAPID_PRIVATE_KEY,
       subject: this.env.VAPID_SUBJECT,
     });
@@ -335,7 +335,10 @@ export class Indexer extends DurableObject<Env> {
       if (gone) this.deleteSubscription({ endpoint });
     }
     const failed = results.filter((r) => r.status >= 300 && !r.gone).length;
-    console.log(`Notified ${kind} ${after.id}: ${results.length} sent, ${failed} failed`);
+    const scores = (m: Match) => `${m.home.score}-${m.away.score}`;
+    console.log(
+      `Notified ${kind} ${after.id} (${scores(before)} -> ${scores(after)}, ${after.state} ${after.clock ?? ""}): ${results.length} sent, ${failed} failed`,
+    );
     if (failed > 0) {
       this.recordError({ message: `notify ${kind} ${after.id}: ${failed} pushes failed` });
     }

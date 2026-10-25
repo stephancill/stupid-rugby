@@ -113,6 +113,24 @@ describe("payloadFor", () => {
     });
     expect(payload.body).toBe("Munster score");
   });
+  test("score taken back", () => {
+    const payload = payloadFor({
+      kind: "score",
+      before: live(0, 2),
+      match: live(0, 0),
+      scorers: [],
+    });
+    expect(payload).toMatchObject({ title: "Leinster 0–0 Munster", body: "Score corrected" });
+  });
+  test("score with a correction", () => {
+    const payload = payloadFor({
+      kind: "score",
+      before: live(0, 2),
+      match: live(3, 0),
+      scorers: [{ team: "home", incidents: [incident("penalty", "home", 600, "Sexton")] }],
+    });
+    expect(payload.body).toBe("Penalty – Sexton 11' · Score corrected");
+  });
   test("full time", () => {
     const after = match({ ...live(10, 7), state: "C", phase: "complete", winner: "home" });
     expect(payloadFor({ kind: "full-time", match: after }).body).toBe(
