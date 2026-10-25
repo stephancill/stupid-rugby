@@ -2,17 +2,20 @@ import { useQueries } from "@tanstack/react-query";
 import { parseAsStringLiteral, useQueryState } from "nuqs";
 import { useMemo } from "react";
 import { bonusRules } from "../../src/competitions.ts";
+import { liveClock } from "../../src/match-clock.ts";
 import { type LiveTeam, projectStandings } from "../../src/live-standings.ts";
 import type { Standings } from "../../src/standings.ts";
 import type { Match } from "../../src/worldrugby.ts";
 import { fetchMatchSummary } from "./api.ts";
+import { useNow } from "./now.ts";
 
 const tableParser = parseAsStringLiteral(["official", "live"] as const).withDefault("official");
 
 function LiveNote({ live }: { live: LiveTeam }) {
   const { match, side } = live;
   const opponent = match[side === "home" ? "away" : "home"];
-  const clock = match.state === "LHT" ? "HT" : match.clock;
+  const now = useNow({ enabled: true });
+  const clock = liveClock({ match, now });
   return (
     <small className="live">
       {" "}

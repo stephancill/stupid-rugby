@@ -216,6 +216,10 @@ export type Match = {
   state: MatchState;
   phase: MatchPhase;
   clock: string | null;
+  // When the current period (half or extra-time period) started, as seen by the index
+  // (worker/indexer.ts); null when unknown. World Rugby's clock is sometimes started at the
+  // scheduled kickoff instead of the real one, so the app counts from this instead.
+  periodStart: Date | null;
   winner: "home" | "away" | "draw" | null;
 };
 
@@ -253,6 +257,7 @@ function normalize({ raw }: { raw: RawMatch }): Match {
     state: raw.status,
     phase,
     clock: phase === "live" ? (raw.clock?.label ?? null) : null,
+    periodStart: null,
     winner:
       raw.outcome === "A"
         ? "home"

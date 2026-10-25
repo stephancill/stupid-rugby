@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { majorCompetitions } from "../../src/competitions.ts";
-import { parseStats, parseSummary, UPSTREAM_URL } from "../../src/worldrugby.ts";
+import { type MatchSummary, parseStats, parseSummary, UPSTREAM_URL } from "../../src/worldrugby.ts";
 import { apiIndex } from "./api-index.ts";
 import { type Env, Indexer, type ReadResult } from "./indexer.ts";
 import { followKinds, subscriptionSchema } from "./notify.ts";
@@ -110,6 +110,19 @@ function indexer({ env }: { env: Env }) {
   return env.INDEXER.get(env.INDEXER.idFromName("main"));
 }
 
+// The summary comes straight from World Rugby, which has no period start; take the index's
+// when both are in the same period. Otherwise (the index hasn't caught up, or the match isn't
+// indexed) it stays null and clients fall back to World Rugby's clock.
+async function withIndexedPeriod({ env, summary }: { env: Env; summary: MatchSummary }) {
+  const indexed = await indexer({ env }).match({ id: summary.match.id });
+  if (indexed.status !== 200) return summary;
+  const { match } = JSON.parse(indexed.body) as {
+    match: { state: string; periodStart?: string | null };
+  };
+  if (match.state !== summary.match.state || !match.periodStart) return summary;
+  return { ...summary, match: { ...summary.match, periodStart: new Date(match.periodStart) } };
+}
+
 function touchesToday({ from, to }: { from: number; to: number }) {
   const now = Date.now();
   return from < now + DAY && to > now - DAY;
@@ -215,7 +228,10 @@ for (const detail of ["summary", "stats"] as const) {
         const final = json.match?.status === "C";
         const body =
           detail === "summary"
-            ? { final, ...parseSummary({ json }) }
+            ? {
+                final,
+                ...(await withIndexedPeriod({ env: c.env, summary: parseSummary({ json }) })),
+              }
             : { final, stats: parseStats({ json }) };
         return { status: 200, body: JSON.stringify(body) };
       },

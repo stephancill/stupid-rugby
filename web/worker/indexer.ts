@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { competitionKey, majorCompetitions } from "../../src/competitions.ts";
 import { createEspnClient } from "../../src/espn.ts";
 import { isRateLimited } from "../../src/http.ts";
+import { withPeriodStart } from "../../src/match-clock.ts";
 import type { Standings } from "../../src/standings.ts";
 import {
   createClient,
@@ -178,8 +179,12 @@ function majorForSeason({ label }: { label: string }) {
 }
 
 function toMatch({ json }: { json: string }): Match {
-  const raw = JSON.parse(json) as Match & { kickoff: string };
-  return { ...raw, kickoff: new Date(raw.kickoff) };
+  const raw = JSON.parse(json) as Match & { kickoff: string; periodStart?: string | null };
+  return {
+    ...raw,
+    kickoff: new Date(raw.kickoff),
+    periodStart: raw.periodStart ? new Date(raw.periodStart) : null,
+  };
 }
 
 export class Indexer extends DurableObject<Env> {
@@ -233,11 +238,17 @@ export class Indexer extends DurableObject<Env> {
   // the previous version (null for a match seen for the first time).
   saveMatches({ matches }: { matches: Match[] }) {
     const changes: MatchChange[] = [];
-    for (const match of matches) {
-      const json = JSON.stringify(match);
+    const now = new Date();
+    for (const upstream of matches) {
       const before = this.sql
-        .exec<{ json: string }>("SELECT json FROM matches WHERE id = ?", match.id)
+        .exec<{ json: string }>("SELECT json FROM matches WHERE id = ?", upstream.id)
         .toArray()[0]?.json;
+      const match = withPeriodStart({
+        match: upstream,
+        before: before ? toMatch({ json: before }) : null,
+        now,
+      });
+      const json = JSON.stringify(match);
       if (before === json) continue;
       this.sql.exec(
         `INSERT OR REPLACE INTO matches (id, season_id, kickoff, phase, home_id, away_id, json)

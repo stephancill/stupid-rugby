@@ -15,6 +15,7 @@ function match(overrides: Partial<Match> = {}): Match {
     state: "U",
     phase: "scheduled",
     clock: null,
+    periodStart: null,
     winner: null,
     ...overrides,
   };

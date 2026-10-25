@@ -28,6 +28,8 @@ export const matchSchema = z.object({
   state: z.enum(matchStates),
   phase: z.enum(matchPhases),
   clock: z.string().nullable(),
+  // Absent in responses cached before it existed.
+  periodStart: z.coerce.date().nullable().default(null),
   winner: z.enum(["home", "away", "draw"]).nullable(),
 }) satisfies z.ZodType<Match>;
 

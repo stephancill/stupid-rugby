@@ -1,3 +1,4 @@
+import { liveClock } from "../../src/match-clock.ts";
 import type { Match } from "../../src/worldrugby.ts";
 
 export function formatDay({ key }: { key: string }) {
@@ -13,9 +14,10 @@ function formatTime({ date }: { date: Date }) {
   return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
-export function matchStatus({ match }: { match: Match }) {
+// `now` comes from useNow, so live clocks tick.
+export function matchStatus({ match, now }: { match: Match; now: Date }) {
   return match.phase === "live"
-    ? `LIVE ${match.state === "LHT" ? "HT" : (match.clock ?? "")}`
+    ? `LIVE ${liveClock({ match, now }) ?? ""}`
     : match.phase === "complete"
       ? "FT"
       : match.phase === "scheduled"

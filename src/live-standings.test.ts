@@ -70,6 +70,7 @@ function match(
     state: phase === "live" ? "L2" : "C",
     phase,
     clock: null,
+    periodStart: null,
     winner: null,
   };
 }

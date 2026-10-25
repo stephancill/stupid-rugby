@@ -1,11 +1,13 @@
 import { Link, useNavigate } from "react-router";
 import type { Match } from "../../src/worldrugby.ts";
 import { matchStatus } from "./format.ts";
+import { useNow } from "./now.ts";
 
 // The whole row opens the match. The score stays a real link, for keyboard focus, middle
 // click and "open in new tab".
 export function MatchRow({ match }: { match: Match }) {
   const navigate = useNavigate();
+  const now = useNow({ enabled: match.phase === "live" });
   const { home, away } = match;
   const showScore = match.phase === "complete" || match.phase === "live";
   const url = `/matches/${match.id}`;
@@ -20,7 +22,7 @@ export function MatchRow({ match }: { match: Match }) {
         else void navigate(url);
       }}
     >
-      <td className="status">{matchStatus({ match })}</td>
+      <td className="status">{matchStatus({ match, now })}</td>
       <td className={`team home${match.winner === "home" ? " winner" : ""}`}>{home.name}</td>
       <td className="score">
         <Link to={url}>{showScore ? `${home.score} – ${away.score}` : "v"}</Link>

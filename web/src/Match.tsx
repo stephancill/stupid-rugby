@@ -11,6 +11,7 @@ import {
 import { fetchMatchStats, fetchMatchSummary } from "./api.ts";
 import { FollowButton, PushHint } from "./FollowButton.tsx";
 import { matchStatus } from "./format.ts";
+import { useNow } from "./now.ts";
 
 const LIVE_REFETCH_MS = 10_000;
 const PRE_MATCH_REFETCH_MS = 60_000;
@@ -194,6 +195,7 @@ export function MatchPage() {
     refetchInterval: ({ state }) => refetchFor({ match: state.data?.match }),
   });
   const match = summary.data?.match;
+  const now = useNow({ enabled: match?.phase === "live" });
   const stats = useQuery({
     queryKey: ["match-stats", id],
     queryFn: () => fetchMatchStats({ id }),
@@ -243,7 +245,7 @@ export function MatchPage() {
       </h1>
       <p>
         <strong className={match.phase === "live" ? "live" : undefined}>
-          {matchStatus({ match })}
+          {matchStatus({ match, now })}
         </strong>
         {" · "}
         <Link to={competitionLink}>{baseLabel({ label: match.competition })}</Link>
