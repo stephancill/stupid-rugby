@@ -1,6 +1,15 @@
 import { z } from "zod";
 import type { ApiError } from "../../src/http.ts";
-import { matchPhases, matchStates, type Match, type Season } from "../../src/worldrugby.ts";
+import {
+  type Incident,
+  type LineupPlayer,
+  matchPhases,
+  matchStates,
+  type Match,
+  type MatchSummary,
+  type Season,
+  type TeamStats,
+} from "../../src/worldrugby.ts";
 import type { Standings } from "../../src/standings.ts";
 
 // Client for the app's own API (worker/index.ts), which serves from the index.
@@ -107,6 +116,46 @@ export async function fetchSeasons() {
     schema: z.object({ seasons: z.array(seasonSchema) }),
   });
   return seasons;
+}
+
+const incidentSchema = z.object({
+  kind: z.enum(["try", "conversion", "penalty", "drop-goal", "yellow-card", "red-card"]),
+  team: z.enum(["home", "away"]),
+  secs: z.number(),
+  clock: z.string(),
+  player: z.string().nullable(),
+}) satisfies z.ZodType<Incident>;
+
+const lineupSchema = z.array(
+  z.object({
+    id: z.string(),
+    number: z.string().nullable(),
+    name: z.string(),
+    position: z.string().nullable(),
+    captain: z.boolean(),
+    replacement: z.boolean(),
+  }),
+) satisfies z.ZodType<LineupPlayer[]>;
+
+export function fetchMatchSummary({ id }: { id: string }): Promise<MatchSummary> {
+  return get({
+    path: `/api/matches/${encodeURIComponent(id)}/summary`,
+    schema: z.object({
+      match: matchSchema,
+      lineups: z.object({ home: lineupSchema, away: lineupSchema }),
+      incidents: z.array(incidentSchema),
+      officials: z.array(z.object({ name: z.string(), position: z.string() })),
+    }),
+  });
+}
+
+export async function fetchMatchStats({ id }: { id: string }): Promise<TeamStats> {
+  const side = z.record(z.string(), z.number());
+  const { stats } = await get({
+    path: `/api/matches/${encodeURIComponent(id)}/stats`,
+    schema: z.object({ stats: z.object({ home: side, away: side }).nullable() }),
+  });
+  return stats;
 }
 
 export function fetchSeason({ id }: { id: string }) {

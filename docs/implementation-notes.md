@@ -32,7 +32,7 @@ See `docs/research.md` for source evaluation.
 ## Match page (`web/src/Match.tsx`)
 
 - `/matches/:id`, linked from every score (or "v") in match lists.
-- Data: World Rugby's `/match/{id}/summary` (line-ups, scorers, cards, officials) and `/match/{id}/stats` (team stats; only fetched once the match has started) through the `/api/wr` proxy, parsed by `fetchSummary` and `fetchStats` in `src/worldrugby.ts`. Not indexed.
+- Data: `/api/matches/:id/summary` (line-ups, scorers, cards, officials) and `/api/matches/:id/stats` (team stats; only fetched once the match has started), normalized from World Rugby's `/match/{id}/summary` and `/stats` by the worker. Not indexed.
 - Incidents are attributed to the team whose list they appear under: their `teamIndex` field is unreliable (1 for the home side in live data). A try with no player is a penalty try. Minutes follow rugby convention (02:56 shows as 3').
 - Captains are listed by either player id or altId.
 - The summary's clock is fresher than `/match` lists, whose clock only moves when the score changes (scores themselves update in both within the same 15s sample). The header uses the summary.
@@ -64,12 +64,17 @@ Goal: browsers never cause upstream calls for matches, seasons or standings, liv
 
 ## API (`web/worker/index.ts`)
 
+The API is public: GET routes send `Access-Control-Allow-Origin: *`, `GET /api` returns a self-describing index (`worker/api-index.ts`), and `skills/stupid-rugby/SKILL.md` is the agent guide, covering endpoints, the data model, recipes, and how an agent can receive notifications with its own HTTPS webhook (tested example in `skills/stupid-rugby/examples/push-webhook.ts`). `run_worker_first` includes `/api` itself as well as `/api/*`. `index.html` points agents at both: `<link rel="service-desc">` to `/api`, `<link rel="service-doc">` and `<link rel="alternate" type="text/markdown">` to the raw skill on GitHub, and the meta description mentions them.
+
+- `GET /api/competitions` (static, from `src/competitions.ts`), `GET /api/teams?q=` (team ids by name substring, most matches first, with the latest competition to tell same-named teams apart), `GET /api/matches/live`, `GET /api/matches/:id`.
+- `GET /api/matches/:id/summary` and `/stats`: fetched from World Rugby on demand, normalized with `parseSummary`/`parseStats` (`src/worldrugby.ts`) and cached (10s, or 1h once `final`, i.e. status `C`). These replaced the raw `/api/wr` passthrough; the match page uses them.
+
 - `GET /api/status`: `{ ready, window, lastKickoff, backlog, cooldownUntil, lastError }`.
 - `GET /api/matches?from=YYYY-MM-DD&to=YYYY-MM-DD[&teams=id,id]`: matches kicking off in `[from, to)` UTC.
 - `GET /api/seasons`, `GET /api/seasons/:id` (`{ season, matches, standings }`).
 - `GET /api/live`: WebSocket. The index pushes `{ type: "matches", matches }` with every changed match kicking off within 2 days of now. Connections use the hibernation API, so idle sockets cost nothing; `ping` is answered with `pong` by an auto-response without waking the object.
 - Reads are cached per isolate (memory LRU) and per colo (Cache API, custom domain only): 10s for ranges touching today and for season details, 10 min for other ranges, 1h for the season list. Only 200s are cached.
-- `GET /api/wr/rugby/v3/match/:id/(summary|stats)`: the only remaining World Rugby proxy, for the match page (per-match details aren't indexed). It uses the same cache layers: 10s until the match is complete, then 1h. A 429 starts a cooldown (2 min doubling to 30 min) during which it answers 429 without calling upstream. The ESPN proxy is gone; the index calls ESPN directly.
+- Upstream calls for match details keep a 429 cooldown (2 min doubling to 30 min) during which they answer 429 without calling World Rugby. The ESPN proxy is gone; the index calls ESPN directly.
 
 ## Live updates (`web/src/live.ts`)
 

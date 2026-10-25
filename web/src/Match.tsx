@@ -3,17 +3,14 @@ import { useEffect } from "react";
 import { Link, useParams } from "react-router";
 import { baseLabel, competitionKey } from "../../src/competitions.ts";
 import {
-  createClient,
   type Incident,
   type LineupPlayer,
   type Match,
   type TeamStats,
 } from "../../src/worldrugby.ts";
+import { fetchMatchStats, fetchMatchSummary } from "./api.ts";
 import { FollowButton, PushHint } from "./FollowButton.tsx";
 import { matchStatus } from "./format.ts";
-
-// Per-match details aren't indexed; they go through the worker's caching proxy.
-const { fetchSummary, fetchStats } = createClient({ baseUrl: "/api/wr" });
 
 const LIVE_REFETCH_MS = 10_000;
 const PRE_MATCH_REFETCH_MS = 60_000;
@@ -126,14 +123,14 @@ export function MatchPage() {
   const { id = "" } = useParams();
   const summary = useQuery({
     queryKey: ["match-summary", id],
-    queryFn: () => fetchSummary({ matchId: id }),
+    queryFn: () => fetchMatchSummary({ id }),
     staleTime: 10_000,
     refetchInterval: ({ state }) => refetchFor({ match: state.data?.match }),
   });
   const match = summary.data?.match;
   const stats = useQuery({
     queryKey: ["match-stats", id],
-    queryFn: () => fetchStats({ matchId: id }),
+    queryFn: () => fetchMatchStats({ id }),
     enabled: match !== undefined && match.phase !== "scheduled",
     staleTime: 10_000,
     refetchInterval: match?.phase === "live" ? 3 * LIVE_REFETCH_MS : false,

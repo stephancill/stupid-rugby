@@ -220,7 +220,7 @@ export function Timeline() {
     <>
       <header>
         <h1>
-          Stupid Rugby {isFetching && <small>updating…</small>}
+          stupid rugby {isFetching && <small>updating…</small>}
           <Link to="/notifications" className="nav">
             Notifications
           </Link>

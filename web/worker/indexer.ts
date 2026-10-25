@@ -817,6 +817,64 @@ export class Indexer extends DurableObject<Env> {
     return { status: 200, body: `{"matches":[${json.join(",")}]}` };
   }
 
+  // Matches in progress right now.
+  liveMatches(): ReadResult {
+    const unavailable = this.unavailable();
+    if (unavailable) return unavailable;
+    const json = this.sql
+      .exec<{ json: string }>("SELECT json FROM matches WHERE phase = 'live' ORDER BY kickoff")
+      .toArray()
+      .map((r) => r.json);
+    return { status: 200, body: `{"matches":[${json.join(",")}]}` };
+  }
+
+  match({ id }: { id: string }): ReadResult {
+    const unavailable = this.unavailable();
+    if (unavailable) return unavailable;
+    const row = this.sql
+      .exec<{ json: string }>("SELECT json FROM matches WHERE id = ?", id)
+      .toArray()[0];
+    if (!row)
+      return { status: 404, body: JSON.stringify({ error: `Match ${id} is not indexed.` }) };
+    return { status: 200, body: `{"match":${row.json}}` };
+  }
+
+  // Teams whose name contains `q` (case-insensitive), most matches first. Team ids are what
+  // /api/matches?teams= and team follows take; several teams can share a name (e.g. a club's
+  // men's and A sides), so the latest competition is included to tell them apart.
+  teams({ q }: { q: string }): ReadResult {
+    const unavailable = this.unavailable();
+    if (unavailable) return unavailable;
+    const teams = this.sql
+      .exec<{
+        id: string;
+        name: string;
+        matches: number;
+        lastKickoff: number;
+        competition: string;
+      }>(
+        `WITH sides AS (
+           SELECT home_id AS id, json_extract(json, '$.home.name') AS name, kickoff,
+                  json_extract(json, '$.competition') AS competition FROM matches
+           UNION ALL
+           SELECT away_id, json_extract(json, '$.away.name'), kickoff,
+                  json_extract(json, '$.competition') FROM matches
+         )
+         SELECT id, name, count(*) AS matches, max(kickoff) AS lastKickoff, competition
+         FROM sides WHERE name LIKE ? GROUP BY id ORDER BY matches DESC LIMIT 25`,
+        `%${q}%`,
+      )
+      .toArray()
+      .map((t) => ({
+        id: t.id,
+        name: t.name,
+        matches: t.matches,
+        lastMatch: new Date(t.lastKickoff),
+        latestCompetition: t.competition,
+      }));
+    return { status: 200, body: JSON.stringify({ teams }) };
+  }
+
   seasons(): ReadResult {
     const unavailable = this.unavailable();
     if (unavailable) return unavailable;

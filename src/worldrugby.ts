@@ -264,6 +264,61 @@ function normalize({ raw }: { raw: RawMatch }): Match {
   };
 }
 
+// Parses a /match/{id}/summary response. Exported so the worker can normalize responses it
+// fetched (and cached) itself.
+export function parseSummary({ json }: { json: unknown }): MatchSummary {
+  const data = summarySchema.parse(json);
+  const sides = ["home", "away"] as const;
+  const lineups = data.teams.map((team) => {
+    const captains = new Set(team.teamList?.captainIds ?? []);
+    return (team.teamList?.list ?? []).map((entry): LineupPlayer => ({
+      id: entry.player.id,
+      number: entry.number,
+      name: entry.player.name.display,
+      position: entry.positionLabel,
+      captain: captains.has(entry.player.id) || captains.has(entry.player.altId ?? ""),
+      replacement: entry.player.isReplacement ?? false,
+    }));
+  });
+  const names = new Map(lineups.flat().map((p) => [p.id, p.name]));
+  // Each team's incidents are listed under that team (their teamIndex field is unreliable).
+  const incidents = data.teams.flatMap((team, i) => {
+    const kinds: [IncidentKind, z.infer<typeof incidentSchema>[]][] = [
+      ["try", team.scoring.Try],
+      ["conversion", team.scoring.Con],
+      ["penalty", team.scoring.Pen],
+      ["drop-goal", team.scoring.dropGoals],
+      ["yellow-card", team.disciplinary.YC],
+      ["red-card", team.disciplinary.RC],
+    ];
+    return kinds.flatMap(([kind, list]) =>
+      list.map((e): Incident => ({
+        kind,
+        team: sides[i]!,
+        secs: e.time.secs,
+        clock: e.time.label,
+        player: (e.playerId && names.get(e.playerId)) ?? null,
+      })),
+    );
+  });
+  return {
+    match: normalize({ raw: data.match }),
+    lineups: { home: lineups[0]!, away: lineups[1]! },
+    incidents: incidents.sort((a, b) => a.secs - b.secs),
+    officials: data.officials.map((o) => ({
+      name: o.official.name.display,
+      position: o.position,
+    })),
+  };
+}
+
+export function parseStats({ json }: { json: unknown }): TeamStats {
+  const data = statsSchema.parse(json);
+  const [home, away] = data.teamStats.map((t) => t.stats ?? {});
+  if (!home || !away || Object.keys(home).length === 0) return null;
+  return { home, away };
+}
+
 function isoDate({ date }: { date: Date }) {
   return date.toISOString().slice(0, 10);
 }
@@ -340,60 +395,15 @@ export function createClient({ baseUrl = UPSTREAM_URL }: { baseUrl?: string } = 
   // Line-ups, scorers and cards. The match in it can be fresher than in /match lists, whose
   // clock only moves when the score does.
   async function fetchSummary({ matchId }: { matchId: string }): Promise<MatchSummary> {
-    const data = summarySchema.parse(
-      await getJson({ source: "World Rugby", url: `${apiUrl}/match/${matchId}/summary` }),
-    );
-    const sides = ["home", "away"] as const;
-    const lineups = data.teams.map((team) => {
-      const captains = new Set(team.teamList?.captainIds ?? []);
-      return (team.teamList?.list ?? []).map((entry): LineupPlayer => ({
-        id: entry.player.id,
-        number: entry.number,
-        name: entry.player.name.display,
-        position: entry.positionLabel,
-        captain: captains.has(entry.player.id) || captains.has(entry.player.altId ?? ""),
-        replacement: entry.player.isReplacement ?? false,
-      }));
+    return parseSummary({
+      json: await getJson({ source: "World Rugby", url: `${apiUrl}/match/${matchId}/summary` }),
     });
-    const names = new Map(lineups.flat().map((p) => [p.id, p.name]));
-    // Each team's incidents are listed under that team (their teamIndex field is unreliable).
-    const incidents = data.teams.flatMap((team, i) => {
-      const kinds: [IncidentKind, z.infer<typeof incidentSchema>[]][] = [
-        ["try", team.scoring.Try],
-        ["conversion", team.scoring.Con],
-        ["penalty", team.scoring.Pen],
-        ["drop-goal", team.scoring.dropGoals],
-        ["yellow-card", team.disciplinary.YC],
-        ["red-card", team.disciplinary.RC],
-      ];
-      return kinds.flatMap(([kind, list]) =>
-        list.map((e): Incident => ({
-          kind,
-          team: sides[i]!,
-          secs: e.time.secs,
-          clock: e.time.label,
-          player: (e.playerId && names.get(e.playerId)) ?? null,
-        })),
-      );
-    });
-    return {
-      match: normalize({ raw: data.match }),
-      lineups: { home: lineups[0]!, away: lineups[1]! },
-      incidents: incidents.sort((a, b) => a.secs - b.secs),
-      officials: data.officials.map((o) => ({
-        name: o.official.name.display,
-        position: o.position,
-      })),
-    };
   }
 
   async function fetchStats({ matchId }: { matchId: string }): Promise<TeamStats> {
-    const data = statsSchema.parse(
-      await getJson({ source: "World Rugby", url: `${apiUrl}/match/${matchId}/stats` }),
-    );
-    const [home, away] = data.teamStats.map((t) => t.stats ?? {});
-    if (!home || !away || Object.keys(home).length === 0) return null;
-    return { home, away };
+    return parseStats({
+      json: await getJson({ source: "World Rugby", url: `${apiUrl}/match/${matchId}/stats` }),
+    });
   }
 
   // Seasons starting within [from, to].
