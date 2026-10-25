@@ -31,10 +31,10 @@ See `docs/research.md` for source evaluation.
 
 ## Match page (`web/src/Match.tsx`)
 
-- `/matches/:id`, linked from every score (or "v") in match lists.
+- `/matches/:id`. Every match row in lists opens it on click (`MatchRow`), ignoring clicks that select text; cmd/ctrl-click opens a new tab. The score (or "v") stays a real link for keyboard and middle-click.
 - Data: `/api/matches/:id/summary` (line-ups, scorers, cards, officials) and `/api/matches/:id/stats` (team stats; only fetched once the match has started), normalized from World Rugby's `/match/{id}/summary` and `/stats` by the worker. Not indexed.
 - Incidents are attributed to the team whose list they appear under: their `teamIndex` field is unreliable (1 for the home side in live data). A try with no player is a penalty try. Minutes follow rugby convention (02:56 shows as 3').
-- Captains are listed by either player id or altId.
+- Captains are listed by either player id or altId. Line-ups are sorted by shirt number (upstream sometimes shuffles them); starters (1–15) come first, then a "Replacements" heading and the bench, muted. Positions aren't shown: the shirt number implies them.
 - The summary's clock is fresher than `/match` lists, whose clock only moves when the score changes (scores themselves update in both within the same 15s sample). The header uses the summary.
 - Refreshes every 10s while live (the proxy's cache lifetime for unfinished matches) and every minute from 2h before kickoff (line-ups land about an hour before). Stats refresh every 30s while live.
 - The stats table shows a curated subset of the ~130 team stats.
@@ -60,6 +60,7 @@ Goal: browsers never cause upstream calls for matches, seasons or standings, liv
   - Bootstrap (first alarm): queue every week in the window ordered by distance from now (so the weeks people look at fill first), plus `seasons`. About 375 jobs, so about 30 min at one per 5s. The index is `ready` once nothing is due.
 - Writes: a match row is only rewritten when its JSON changed, because rows written are the scarcest free allowance (100k/day; an index entry counts too, and each `setAlarm` is one write).
 - Rate limiting: a 429 starts a cooldown (2 min doubling to 30 min, persisted in `state`) during which nothing calls upstream; failed jobs retry with exponential backoff (up to 1h). Non-429 failures are recorded as `lastError` in `/api/status` and logged.
+- After a deploy, the running Durable Object can keep the previous code for a few minutes (seen while it was busy backfilling). Worker routes calling a new RPC method fail meanwhile with "The RPC receiver does not implement the method". It resolved on its own about 5 min after the deploy.
 - The alarm handler never throws and always sets the next alarm, because an alarm that throws is retried only a few times and then dropped.
 
 ## API (`web/worker/index.ts`)

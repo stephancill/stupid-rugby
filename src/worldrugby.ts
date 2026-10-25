@@ -280,6 +280,9 @@ export function parseSummary({ json }: { json: unknown }): MatchSummary {
       replacement: entry.player.isReplacement ?? false,
     }));
   });
+  // Upstream usually lists players by shirt number but sometimes shuffles them.
+  const shirt = (p: LineupPlayer) => Number(p.number) || Number.MAX_SAFE_INTEGER;
+  for (const lineup of lineups) lineup.sort((a, b) => shirt(a) - shirt(b));
   const names = new Map(lineups.flat().map((p) => [p.id, p.name]));
   // Each team's incidents are listed under that team (their teamIndex field is unreliable).
   const incidents = data.teams.flatMap((team, i) => {

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { Fragment, useEffect } from "react";
 import { Link, useParams } from "react-router";
 import { baseLabel, competitionKey } from "../../src/competitions.ts";
 import {
@@ -104,15 +104,22 @@ function Lineup({ name, players }: { name: string; players: LineupPlayer[] }) {
     <table className="lineup">
       <caption>{name}</caption>
       <tbody>
-        {players.map((p) => (
-          <tr key={p.id} className={p.replacement ? "replacement" : undefined}>
-            <td>{p.number}</td>
-            <td className="team-col">
-              {p.name}
-              {p.captain && " (c)"}
-            </td>
-            <td className="meta">{p.position}</td>
-          </tr>
+        {players.map((p, i) => (
+          <Fragment key={p.id}>
+            {/* Starters (1–15), then the bench (16+), shown muted. */}
+            {p.replacement && !players[i - 1]?.replacement && (
+              <tr className="replacement">
+                <th colSpan={2}>Replacements</th>
+              </tr>
+            )}
+            <tr className={p.replacement ? "replacement" : undefined}>
+              <td>{p.number}</td>
+              <td className="team-col">
+                {p.name}
+                {p.captain && " (c)"}
+              </td>
+            </tr>
+          </Fragment>
         ))}
       </tbody>
     </table>
