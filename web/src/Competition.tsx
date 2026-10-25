@@ -2,62 +2,12 @@ import { parseAsString, useQueryState } from "nuqs";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import { baseLabel, currentSeason, findCompetitionByKey } from "../../src/competitions.ts";
-import type { Standings } from "../../src/standings.ts";
 import { useSeason, useSeasons } from "./competition-data.ts";
 import { FollowButton, PushHint } from "./FollowButton.tsx";
 import { formatDay } from "./format.ts";
 import { MatchRow } from "./match-row.tsx";
+import { StandingsSection } from "./StandingsSection.tsx";
 import { closestDay, dayKey } from "./matches.ts";
-
-function StandingsTables({ standings }: { standings: Standings }) {
-  return (
-    <>
-      {standings.groups.map((group, i) => (
-        <table key={group.name ?? i} className="standings">
-          {group.name && <caption>{group.name}</caption>}
-          <thead>
-            <tr>
-              <th>#</th>
-              <th className="team-col">Team</th>
-              <th title="Played">P</th>
-              <th title="Won">W</th>
-              <th title="Drawn">D</th>
-              <th title="Lost">L</th>
-              <th title="Points for">PF</th>
-              <th title="Points against">PA</th>
-              <th title="Points difference">+/-</th>
-              <th title="Bonus points">BP</th>
-              <th title="League points">Pts</th>
-            </tr>
-          </thead>
-          <tbody>
-            {group.rows.map((row) => {
-              const diff = row.pointsFor - row.pointsAgainst;
-              return (
-                <tr key={row.team}>
-                  <td>{row.position}</td>
-                  <td className="team-col">{row.team}</td>
-                  <td>{row.played}</td>
-                  <td>{row.won}</td>
-                  <td>{row.drawn}</td>
-                  <td>{row.lost}</td>
-                  <td>{row.pointsFor}</td>
-                  <td>{row.pointsAgainst}</td>
-                  <td>{diff > 0 ? `+${diff}` : diff}</td>
-                  <td>{row.bonusPoints}</td>
-                  <td>
-                    <strong>{row.points}</strong>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      ))}
-      <p className="source">Standings: {standings.source}</p>
-    </>
-  );
-}
 
 export function CompetitionPage() {
   const { key = "" } = useParams();
@@ -128,7 +78,11 @@ export function CompetitionPage() {
       {detail.isPending ? (
         <p>{seasonId && !detail.error ? "Loading…" : "—"}</p>
       ) : detail.data?.standings ? (
-        <StandingsTables standings={detail.data.standings} />
+        <StandingsSection
+          standings={detail.data.standings}
+          matches={detail.data.matches}
+          competitionKey={key}
+        />
       ) : (
         <p>No standings are available for this season.</p>
       )}

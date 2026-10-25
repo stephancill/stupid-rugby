@@ -1,8 +1,11 @@
+import { type BonusRules, standardBonus } from "./live-standings.ts";
+
 // World Rugby event IDs change every season, so competitions are matched on
 // their label with the trailing season year stripped (e.g. "URC 2027" -> "URC").
 //
 // `seasons` matches World Rugby event (season) labels, which can differ from match labels.
-// `espnId` is ESPN's league id, where ESPN publishes standings.
+// `espnId` is ESPN's league id, where ESPN publishes standings. `bonus` is the bonus point
+// system where it isn't the standard one (see bonusRules).
 export const majorCompetitions = [
   {
     key: "six-nations",
@@ -40,18 +43,28 @@ export const majorCompetitions = [
     seasons: /^English Premiership \d{4}$/,
     espnId: 267979,
   },
-  { key: "top-14", label: "Top 14", seasons: /^Top 14 \d{4}$/, espnId: 270559 },
+  {
+    key: "top-14",
+    label: "Top 14",
+    seasons: /^Top 14 \d{4}$/,
+    espnId: 270559,
+    bonus: { tryBonus: { kind: "margin", min: 3 }, losingMargin: 5 },
+  },
   {
     key: "champions-cup",
     label: "EPCR Champions Cup",
     seasons: /^(EPCR|Investec) Champions Cup \d{4}$/,
     espnId: 271937,
+    // From 2026/27.
+    bonus: { tryBonus: { kind: "margin", min: 3 }, losingMargin: 7 },
   },
   {
     key: "challenge-cup",
     label: "EPCR Challenge Cup",
     seasons: /^EPCR Challenge Cup \d{4}$/,
     espnId: 272073,
+    // From 2026/27.
+    bonus: { tryBonus: { kind: "margin", min: 3 }, losingMargin: 7 },
   },
   {
     key: "super-rugby",
@@ -67,9 +80,20 @@ export const majorCompetitions = [
   { key: "mlr", label: "Major League Rugby", seasons: /^(MLR|Major League Rugby) \d{4}$/ },
   { key: "currie-cup", label: "Currie Cup", seasons: /^Currie Cup \d{4}$/ },
   { key: "npc", label: "Bunnings Warehouse NPC", seasons: /NPC \d{4}$/ },
-  { key: "pro-d2", label: "Pro D2", seasons: /^Pro D2 \d{4}$/ },
+  {
+    key: "pro-d2",
+    label: "Pro D2",
+    seasons: /^Pro D2 \d{4}$/,
+    bonus: { tryBonus: { kind: "margin", min: 3 }, losingMargin: 5 },
+  },
   { key: "championship", label: "English Championship", seasons: /^English Championship \d{4}$/ },
-] as const satisfies readonly { key: string; label: string; seasons: RegExp; espnId?: number }[];
+] as const satisfies readonly {
+  key: string;
+  label: string;
+  seasons: RegExp;
+  espnId?: number;
+  bonus?: BonusRules;
+}[];
 
 export type CompetitionKey = (typeof majorCompetitions)[number]["key"];
 
@@ -95,6 +119,14 @@ export function competitionKey({ label }: { label: string }) {
 
 export function findCompetitionByKey({ key }: { key: string }) {
   return majorCompetitions.find((c) => c.key === key) ?? null;
+}
+
+// Current-season rules: 4 tries and losing by 7 or fewer, unless the competition says
+// otherwise (Top 14 and Pro D2: winning by 3+ tries, losing by 5; EPCR cups from 2026/27:
+// winning by 3+ tries, losing by 7).
+export function bonusRules({ key }: { key: string }): BonusRules {
+  const competition = findCompetitionByKey({ key });
+  return competition && "bonus" in competition ? competition.bonus : standardBonus;
 }
 
 // The season in progress, else the latest that has started, else the next to start.

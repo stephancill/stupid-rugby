@@ -29,6 +29,14 @@ See `docs/research.md` for source evaluation.
   - Fixtures, results and standings come from `/api/seasons/:id` in one request. Standings are null when neither World Rugby nor ESPN has a table for the season, and the page says so rather than showing another season's table.
 - Shared modules: `src/http.ts` (`getJson`, `isRateLimited`), `src/standings.ts` (normalized `Standings`), `src/espn.ts` (`createEspnClient`).
 
+## As it stands (`src/live-standings.ts`, `web/src/StandingsSection.tsx`)
+
+- When a season has a live match, the competition page offers "Official" / "As it stands" (`?table=live`, nuqs). Teams playing are highlighted with their live score in both views; the projected view shows each team's movement against the official table.
+- `projectStandings` applies each live league match as if it ended now: P/W/D/L, PF/PA, match points (4 win, 2 draw) and bonus points by `bonusRules` (`src/competitions.ts`): standard (4+ tries; losing by 7 or fewer), Top 14 and Pro D2 (winning by 3+ tries; losing by 5 or fewer), EPCR cups from 2026/27 (winning by 3+ tries; losing by 7 or fewer). Try counts come from each live match's summary (refetched every 15s); until they load there is no try bonus, and the page says so. Knockout rounds (final/semi/quarter/round of/play-off/barrage) are ignored.
+- Teams are matched to standings rows by record, not name: standings (ESPN) and matches (World Rugby) name teams differently ("La Rochelle" / "Stade Rochelais", "Cardiff Blues" / "Cardiff Rugby", "Newcastle Falcons" / "Newcastle Red Bulls"). A live team's row is the one whose played / points for / points against equal its totals from the season's completed league matches; name similarity (accent-stripped words, shared 5-letter prefixes) only breaks ties, e.g. before anyone has played. Checked against the current Top 14, URC and Premiership with a simulated live round: every team placed correctly. Teams that can't be placed are listed on the page and left out, not guessed.
+- Ordering: teams not playing keep their official order (official tie-breakers vary and can't be reproduced from the table, so re-sorting everything moved teams that weren't playing). Each playing team is reinserted above the first team it beats on points, then points difference, then points for.
+- Tests: `bun test src`.
+
 ## Match page (`web/src/Match.tsx`)
 
 - `/matches/:id`. Every match row in lists opens it on click (`MatchRow`), ignoring clicks that select text; cmd/ctrl-click opens a new tab. The score (or "v") stays a real link for keyboard and middle-click.

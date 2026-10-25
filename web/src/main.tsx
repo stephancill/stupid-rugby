@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
+import { ZodError } from "zod";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter } from "react-router";
 import { RouterProvider } from "react-router/dom";
@@ -12,12 +13,16 @@ import { NotificationsPage } from "./Notifications.tsx";
 import { registerServiceWorker } from "./push.ts";
 import { Timeline } from "./Timeline.tsx";
 
-// Only network failures are retried. The API's own errors (warming up, outside the
-// index's window, unknown season) are shown as they are.
+// Only network failures are retried. Invalid data (ZodError) won't fix itself, and the
+// API's own errors (warming up, outside the index's window, unknown season) are shown as
+// they are.
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: (count, error) => (error as Partial<ApiError>).status === undefined && count < 3,
+      retry: (count, error) =>
+        (error as Partial<ApiError>).status === undefined &&
+        !(error instanceof ZodError) &&
+        count < 3,
     },
   },
 });

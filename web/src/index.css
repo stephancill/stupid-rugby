@@ -257,3 +257,27 @@ tr.match {
 tr.match:hover {
   background: color-mix(in srgb, CanvasText 6%, transparent);
 }
+
+table.standings tr.playing {
+  background: color-mix(in srgb, #d00 10%, transparent);
+}
+
+table.standings tr.playing:nth-child(odd) {
+  background: color-mix(in srgb, #d00 14%, transparent);
+}
+
+table.standings small.up {
+  color: #090;
+}
+
+table.standings small.down {
+  color: #d00;
+}
+
+.table-toggle label {
+  margin-right: 1rem;
+}
+
+table.standings td:first-child {
+  white-space: nowrap;
+}
