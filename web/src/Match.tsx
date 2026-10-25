@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Fragment, useEffect } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { baseLabel, competitionKey } from "../../src/competitions.ts";
 import {
@@ -126,6 +126,65 @@ function Lineup({ name, players }: { name: string; players: LineupPlayer[] }) {
   );
 }
 
+// rugbybox.me's streams are served by embedsports.me at /rugby/<home>-vs-<away>-stream-<n>,
+// with team names slugified from the same World Rugby naming our matches use.
+// Matches they haven't set up show their own "Starting Soon" placeholder.
+function streamUrl({ match, link }: { match: Match; link: number }) {
+  const slug = (name: string) =>
+    name
+      // rugbybox drops the club prefix for UBB ("Union Bordeaux-Begles" → "bordeaux-begles").
+      .replace(/^Union\s+/, "")
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  return `https://embedsports.me/rugby/${slug(match.home.name)}-vs-${slug(match.away.name)}-stream-${link}`;
+}
+
+function Stream({ match }: { match: Match }) {
+  const [open, setOpen] = useState(false);
+  const [link, setLink] = useState(1);
+  return (
+    <details className="stream" onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>Watch live</summary>
+      {open && (
+        <>
+          <fieldset className="stream-links">
+            {[1, 2].map((n) => (
+              <label key={n}>
+                <input
+                  type="radio"
+                  name="stream-link"
+                  checked={link === n}
+                  onChange={() => setLink(n)}
+                />{" "}
+                Link {n}
+              </label>
+            ))}
+          </fieldset>
+          {/* No sandbox attribute: the embed's player refuses to run sandboxed. */}
+          <div className="stream-frame">
+            <iframe
+              key={link}
+              src={streamUrl({ match, link })}
+              title="Live stream"
+              allowFullScreen
+              allow="autoplay; fullscreen; picture-in-picture"
+              referrerPolicy="unsafe-url"
+            />
+          </div>
+          <p className="source">
+            Free stream embedded from <a href="https://embedsports.me">embedsports.me</a> —
+            availability varies. More links on{" "}
+            <a href="https://rugbybox.me/rugby-union-streams">rugbybox.me</a>.
+          </p>
+        </>
+      )}
+    </details>
+  );
+}
+
 export function MatchPage() {
   const { id = "" } = useParams();
   const summary = useQuery({
@@ -226,6 +285,8 @@ export function MatchPage() {
         />
         <PushHint />
       </p>
+
+      {match.phase === "live" && <Stream match={match} />}
 
       <h2>Scoring and cards</h2>
       {incidents.length === 0 ? (
