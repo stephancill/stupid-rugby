@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "stupid-rugby",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "not_found_handling": "single-page-application",
+    // Without this the SPA fallback answers /api/* navigations with index.html.
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": { "enabled": true },
+  "durable_objects": { "bindings": [{ "name": "INDEXER", "class_name": "Indexer" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Indexer"] }],
+  // Web Push. VAPID_PRIVATE_KEY (a JWK) is a secret: .env.local in dev, `wrangler secret put`
+  // in production.
+  "vars": {
+    "VAPID_PUBLIC_KEY": "BMaXazhGc7Yhgai_ljdzt06YdljWqUuGVxWT6XhYFDBX1GEn2SXwHRbMd4Ua_mpY7IwwGC71dzxHcU7ksRe0A1k",
+    "VAPID_SUBJECT": "https://stupidtech.net"
+  },
+  // A custom domain (not *.workers.dev) so the proxy's Cache API layer is active.
+  "routes": [{ "pattern": "rugby.stupidtech.net", "custom_domain": true }]
+}

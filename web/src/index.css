@@ -1,0 +1,245 @@
+:root {
+  color-scheme: light dark;
+  /* Timeline.tsx anchors manually when prepending earlier days. */
+  overflow-anchor: none;
+  font-family: system-ui, sans-serif;
+  --highlight: #fff6c2;
+  --muted: #777;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --highlight: #3a3410;
+    --muted: #999;
+  }
+}
+
+body {
+  margin: 0 auto;
+  max-width: 60rem;
+  padding: 0 1rem 2rem;
+}
+
+header {
+  position: sticky;
+  top: 0;
+  background: Canvas;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  z-index: 1;
+}
+
+header h1 {
+  font-size: 1.25rem;
+  margin: 0 0 0.5rem;
+}
+
+header small {
+  font-weight: normal;
+  color: var(--muted);
+}
+
+fieldset {
+  margin: 0 0 0.5rem;
+}
+
+fieldset label {
+  display: inline-block;
+  margin-right: 0.75rem;
+  white-space: nowrap;
+}
+
+details {
+  margin: 0.25rem 0;
+}
+
+.day {
+  padding: 0.25rem 0.5rem;
+  scroll-margin-top: 14rem;
+}
+
+.day.highlighted {
+  background: var(--highlight);
+}
+
+.day h2 {
+  font-size: 1rem;
+  margin: 1rem 0 0.25rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 0.5rem;
+}
+
+caption {
+  text-align: left;
+  font-weight: 600;
+  padding: 0.25rem 0;
+}
+
+td {
+  padding: 0.15rem 0.25rem;
+}
+
+td.status {
+  width: 5rem;
+  color: var(--muted);
+}
+
+td.team {
+  width: 25%;
+}
+
+td.home {
+  text-align: right;
+}
+
+td.score {
+  width: 5rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+td.meta {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+.winner {
+  font-weight: 600;
+}
+
+tr.live td.status {
+  color: #d00;
+  font-weight: 600;
+}
+
+.error {
+  color: #d00;
+}
+
+@media (max-width: 40rem) {
+  td.meta {
+    display: none;
+  }
+}
+
+/* Fixed height so swapping the button for "Loading…" doesn't shift the list. */
+.edge {
+  display: flex;
+  align-items: center;
+  height: 2.5rem;
+  margin: 0.5rem 0;
+  color: var(--muted);
+}
+
+main.competition h2,
+main.match h2 {
+  font-size: 1.1rem;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.day h3 {
+  font-size: 1rem;
+  margin: 1rem 0 0.25rem;
+}
+
+table.standings {
+  width: auto;
+  min-width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+table.standings th,
+table.standings td {
+  padding: 0.15rem 0.5rem;
+  text-align: right;
+}
+
+table.standings .team-col {
+  text-align: left;
+  width: 100%;
+}
+
+table.standings tbody tr:nth-child(odd) {
+  background: color-mix(in srgb, CanvasText 5%, transparent);
+}
+
+.source {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+caption a {
+  color: inherit;
+}
+
+td.score a {
+  color: inherit;
+  text-decoration: none;
+}
+
+td.score a:hover {
+  text-decoration: underline;
+}
+
+.live {
+  color: #d00;
+}
+
+main.match h1 {
+  font-size: 1.5rem;
+  margin: 0.5rem 0;
+}
+
+table.incidents td.status {
+  text-align: center;
+}
+
+table.incidents td.team {
+  width: 45%;
+}
+
+table.stats {
+  font-variant-numeric: tabular-nums;
+}
+
+table.stats td {
+  width: 30%;
+  text-align: center;
+}
+
+table.stats th[scope="row"] {
+  font-weight: normal;
+  color: var(--muted);
+}
+
+.lineups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+
+table.lineup td:first-child {
+  width: 2rem;
+  text-align: right;
+  color: var(--muted);
+}
+
+table.lineup tr.replacement {
+  color: var(--muted);
+}
+
+h1 .nav {
+  float: right;
+  font-size: 0.9rem;
+  font-weight: normal;
+}
+
+.follows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}

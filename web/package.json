@@ -1,0 +1,35 @@
+{
+  "name": "web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "deploy": "bun run build && wrangler deploy"
+  },
+  "dependencies": {
+    "@pushforge/builder": "2.0.5",
+    "@tanstack/react-query": "^5.104.2",
+    "hono": "^4.13.13",
+    "nuqs": "^2.10.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router": "8.4.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.64.0",
+    "@cloudflare/workers-types": "^5.20261016.1",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "oxlint": "^1.81.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0",
+    "wrangler": "^4.151.1"
+  }
+}
