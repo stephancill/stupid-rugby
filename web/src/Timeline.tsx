@@ -162,13 +162,20 @@ export function Timeline() {
     [inCompetitions],
   );
 
+  // An exact team match shows only that team ("Bulls" mustn't include "Newcastle Red
+  // Bulls"); anything else is a substring search while typing.
   const days = useMemo(() => {
     const query = team.trim().toLowerCase();
-    const filtered = query
-      ? inCompetitions.filter((m) => `${m.home.name}\n${m.away.name}`.toLowerCase().includes(query))
-      : inCompetitions;
+    const filtered =
+      teamIds.length > 0
+        ? inCompetitions.filter((m) => teamIds.includes(m.home.id) || teamIds.includes(m.away.id))
+        : query
+          ? inCompetitions.filter((m) =>
+              `${m.home.name}\n${m.away.name}`.toLowerCase().includes(query),
+            )
+          : inCompetitions;
     return Map.groupBy(filtered, (m) => dayKey({ date: m.kickoff }));
-  }, [inCompetitions, team]);
+  }, [inCompetitions, team, teamIds]);
 
   const highlighted = closestDay({ days: [...days.keys()], now });
   const highlightedRef = useRef<HTMLElement>(null);
