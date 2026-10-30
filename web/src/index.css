@@ -83,8 +83,12 @@ td {
   padding: 0.15rem 0.25rem;
 }
 
+/* Wide enough for "LIVE ~52:10" on one line, with fixed-width digits, so a ticking
+   clock doesn't resize the column. */
 td.status {
-  width: 5rem;
+  width: 7rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
   color: var(--muted);
 }
 
