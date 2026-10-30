@@ -174,6 +174,12 @@ app.get("/api/teams", async (c) => {
   });
 });
 
+// Not in the API index: a temporary measurement of how World Rugby's live scores compare
+// with ESPN's (see docs/implementation-notes.md).
+app.get("/api/score-divergences", async (c) =>
+  send({ result: await indexer({ env: c.env }).scoreDivergences() }),
+);
+
 app.get("/api/matches/live", (c) =>
   cached({
     url: new URL(c.req.url),

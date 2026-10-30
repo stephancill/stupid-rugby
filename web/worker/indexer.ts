@@ -1,8 +1,15 @@
 import { DurableObject } from "cloudflare:workers";
-import { competitionKey, majorCompetitions } from "../../src/competitions.ts";
-import { createEspnClient } from "../../src/espn.ts";
+import { competitionKey, findCompetition, majorCompetitions } from "../../src/competitions.ts";
+import { createEspnClient, type EspnEvent } from "../../src/espn.ts";
 import { isRateLimited } from "../../src/http.ts";
 import { withPeriodStart } from "../../src/match-clock.ts";
+import {
+  divergenceStep,
+  espnScore,
+  formatScore,
+  pairEvents,
+  type Score,
+} from "../../src/score-compare.ts";
 import type { Standings } from "../../src/standings.ts";
 import {
   createClient,
@@ -144,6 +151,20 @@ const SCHEMA = `
     PRIMARY KEY (endpoint, kind, target)
   );
   CREATE INDEX IF NOT EXISTS follows_target ON follows (kind, target);
+  -- Periods when World Rugby's and ESPN's live scores disagreed (see compareEspn). Scores
+  -- are "home-away": *_start when the disagreement began, *_last at the latest poll.
+  CREATE TABLE IF NOT EXISTS score_divergences (
+    id INTEGER PRIMARY KEY,
+    match_id TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    wr_start TEXT NOT NULL,
+    espn_start TEXT NOT NULL,
+    wr_last TEXT NOT NULL,
+    espn_last TEXT NOT NULL,
+    ahead TEXT
+  );
+  CREATE INDEX IF NOT EXISTS score_divergences_open ON score_divergences (match_id, ended_at);
 `;
 
 // Weeks are UTC Mondays, like the client's.
@@ -193,6 +214,10 @@ export class Indexer extends DurableObject<Env> {
   espn = createEspnClient();
   // In memory: after an eviction the next alarm simply polls straight away.
   lastLivePoll = 0;
+  // ESPN comparison only. In memory, separate from World Rugby's cooldown so ESPN never
+  // holds up live polls.
+  espnCooldownUntil = 0;
+  unpairedLogged = new Set<string>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -534,6 +559,160 @@ export class Indexer extends DurableObject<Env> {
         }),
     });
     await this.afterSave(this.saveMatches({ matches }));
+    try {
+      await this.compareEspn();
+    } catch (error) {
+      console.warn("ESPN comparison failed", error);
+    }
+  }
+
+  // --- ESPN score comparison --------------------------------------------------------------
+
+  // Compares live scores with ESPN's and records when they disagree, to measure whether
+  // World Rugby lags. Covers live matches in competitions ESPN carries, plus matches with a
+  // disagreement still open (e.g. World Rugby already at full time).
+  async compareEspn() {
+    const now = Date.now();
+    if (now < this.espnCooldownUntil) return;
+    const matches = this.sql
+      .exec<{ json: string }>(
+        `SELECT json FROM matches WHERE phase = 'live'
+           OR id IN (SELECT match_id FROM score_divergences WHERE ended_at IS NULL)`,
+      )
+      .toArray()
+      .map((row) => toMatch(row));
+    const byLeagueDay = new Map<string, { leagueId: number; day: Date; matches: Match[] }>();
+    for (const match of matches) {
+      const competition = findCompetition({ label: match.competition });
+      if (!competition || !("espnId" in competition)) continue;
+      const day = new Date(match.kickoff.toISOString().slice(0, 10));
+      const key = `${competition.espnId} ${day.getTime()}`;
+      const group = byLeagueDay.get(key) ?? { leagueId: competition.espnId, day, matches: [] };
+      group.matches.push(match);
+      byLeagueDay.set(key, group);
+    }
+    const compared = new Set<string>();
+    for (const { leagueId, day, matches: group } of byLeagueDay.values()) {
+      let events: EspnEvent[];
+      try {
+        events = await this.espn.fetchScoreboard({ leagueId, day });
+      } catch (error) {
+        if (isRateLimited({ error })) this.espnCooldownUntil = Date.now() + MIN_COOLDOWN_MS;
+        console.warn(`ESPN scoreboard ${leagueId} failed`, error);
+        continue;
+      }
+      const pairs = pairEvents({ matches: group, events });
+      for (const match of group) {
+        const event = pairs.get(match.id);
+        if (!event) {
+          if (!this.unpairedLogged.has(match.id)) {
+            this.unpairedLogged.add(match.id);
+            console.warn(
+              `ESPN has no event for ${match.id} ${match.home.name} v ${match.away.name}`,
+            );
+          }
+          continue;
+        }
+        const espn = espnScore({ event });
+        if (!espn) continue;
+        compared.add(match.id);
+        this.recordDivergence({
+          match,
+          wr: { home: match.home.score, away: match.away.score },
+          espn,
+          now,
+        });
+      }
+    }
+    // Disagreements that can no longer be compared (match long over, or ESPN dropped it).
+    for (const row of this.sql
+      .exec<{ id: number; match_id: string; kickoff: number }>(
+        `SELECT d.id, d.match_id, m.kickoff FROM score_divergences d
+         LEFT JOIN matches m ON m.id = d.match_id WHERE d.ended_at IS NULL`,
+      )
+      .toArray()) {
+      if (compared.has(row.match_id) || (row.kickoff ?? 0) > now - MAX_MATCH_MS) continue;
+      this.sql.exec(
+        "UPDATE score_divergences SET ended_at = ?, ahead = 'unresolved' WHERE id = ?",
+        now,
+        row.id,
+      );
+      console.log(`Score divergence ${row.match_id} unresolved`);
+    }
+  }
+
+  recordDivergence({
+    match,
+    wr,
+    espn,
+    now,
+  }: {
+    match: Match;
+    wr: Score;
+    espn: Score;
+    now: number;
+  }) {
+    const open = this.sql
+      .exec<{ id: number; started_at: number; wr_last: string; espn_last: string }>(
+        "SELECT id, started_at, wr_last, espn_last FROM score_divergences WHERE match_id = ? AND ended_at IS NULL",
+        match.id,
+      )
+      .toArray()[0];
+    const parse = (score: string): Score => {
+      const [home, away] = score.split("-").map(Number);
+      return { home: home ?? 0, away: away ?? 0 };
+    };
+    const step = divergenceStep({
+      open: open ? { wr: parse(open.wr_last), espn: parse(open.espn_last) } : null,
+      wr,
+      espn,
+    });
+    const label = `${match.id} ${match.home.name} v ${match.away.name}`;
+    const scores = `World Rugby ${formatScore({ score: wr })}, ESPN ${formatScore({ score: espn })}`;
+    switch (step.kind) {
+      case "none":
+        return;
+      case "open":
+        this.sql.exec(
+          `INSERT INTO score_divergences (match_id, started_at, wr_start, espn_start, wr_last, espn_last)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          match.id,
+          now,
+          formatScore({ score: wr }),
+          formatScore({ score: espn }),
+          formatScore({ score: wr }),
+          formatScore({ score: espn }),
+        );
+        console.log(`Score divergence ${label} opened: ${scores}`);
+        return;
+      case "update":
+        // Rows written are the scarcest allowance: only when a score moved.
+        if (
+          open?.wr_last === formatScore({ score: wr }) &&
+          open.espn_last === formatScore({ score: espn })
+        ) {
+          return;
+        }
+        this.sql.exec(
+          "UPDATE score_divergences SET wr_last = ?, espn_last = ? WHERE id = ?",
+          formatScore({ score: wr }),
+          formatScore({ score: espn }),
+          open?.id,
+        );
+        return;
+      case "close":
+        this.sql.exec(
+          "UPDATE score_divergences SET ended_at = ?, ahead = ?, wr_last = ?, espn_last = ? WHERE id = ?",
+          now,
+          step.ahead,
+          formatScore({ score: wr }),
+          formatScore({ score: espn }),
+          open?.id,
+        );
+        console.log(
+          `Score divergence ${label} closed after ${Math.round((now - (open?.started_at ?? now)) / SECOND)}s, ${step.ahead} ahead: ${scores}`,
+        );
+    }
   }
 
   async runJob({ job }: { job: Job }) {
@@ -829,6 +1008,44 @@ export class Indexer extends DurableObject<Env> {
         );
     const json = rows.toArray().map((r) => r.json);
     return { status: 200, body: `{"matches":[${json.join(",")}]}` };
+  }
+
+  // ESPN comparison: disagreements in the last two weeks, newest first. Durations are in
+  // seconds, null while open.
+  scoreDivergences(): ReadResult {
+    const rows = this.sql
+      .exec<{
+        match_id: string;
+        json: string | null;
+        started_at: number;
+        ended_at: number | null;
+        wr_start: string;
+        espn_start: string;
+        wr_last: string;
+        espn_last: string;
+        ahead: string | null;
+      }>(
+        `SELECT d.*, m.json FROM score_divergences d LEFT JOIN matches m ON m.id = d.match_id
+         WHERE d.started_at > ? ORDER BY d.started_at DESC`,
+        Date.now() - 2 * WEEK,
+      )
+      .toArray();
+    const divergences = rows.map((row) => {
+      const match = row.json ? toMatch({ json: row.json }) : null;
+      return {
+        matchId: row.match_id,
+        match: match && `${match.home.name} v ${match.away.name}`,
+        competition: match?.competition ?? null,
+        startedAt: new Date(row.started_at).toISOString(),
+        endedAt: row.ended_at === null ? null : new Date(row.ended_at).toISOString(),
+        seconds:
+          row.ended_at === null ? null : Math.round((row.ended_at - row.started_at) / SECOND),
+        ahead: row.ahead,
+        worldRugby: { start: row.wr_start, last: row.wr_last },
+        espn: { start: row.espn_start, last: row.espn_last },
+      };
+    });
+    return { status: 200, body: JSON.stringify({ divergences }) };
   }
 
   // Matches in progress right now.

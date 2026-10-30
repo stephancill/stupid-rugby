@@ -54,7 +54,7 @@ function words({ name }: { name: string }) {
 }
 
 // Shared significant words, with prefix matches ("rochelle" ~ "rochelais") counting too.
-function similarity({ a, b }: { a: string; b: string }) {
+export function similarity({ a, b }: { a: string; b: string }) {
   const wa = words({ name: a });
   const wb = words({ name: b });
   let score = 0;
