@@ -311,3 +311,8 @@ table.standings td:first-child {
   height: 100%;
   border: 0;
 }
+
+.filters summary {
+  cursor: pointer;
+  margin-bottom: 0.25rem;
+}

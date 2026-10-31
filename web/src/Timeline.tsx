@@ -100,6 +100,29 @@ function useScrollAnchor() {
   });
 }
 
+// Whether the filters are expanded, remembered per browser. Storage can be unavailable
+// (private windows, blocked site data), so it falls back to expanded.
+const FILTERS_OPEN_KEY = "filters-open";
+
+function useFiltersOpen() {
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(FILTERS_OPEN_KEY) !== "false";
+    } catch {
+      return true;
+    }
+  });
+  const set = ({ open }: { open: boolean }) => {
+    setOpen(open);
+    try {
+      localStorage.setItem(FILTERS_OPEN_KEY, String(open));
+    } catch {
+      // Not remembered; the toggle still works for this visit.
+    }
+  };
+  return [open, set] as const;
+}
+
 export function Timeline() {
   // Fixed at mount so render stays pure; live data still refreshes via refetch.
   const [now] = useState(() => new Date());
@@ -107,6 +130,7 @@ export function Timeline() {
   const [weeksAfter, setWeeksAfter] = useState(3);
   const [comp, setComp] = useQueryState("comp", compParser);
   const [team, setTeam] = useQueryState("team", teamParser);
+  const [filtersOpen, setFiltersOpen] = useFiltersOpen();
   const selected = useMemo(() => new Set(comp), [comp]);
   const weekly = useMatches({ now, weeksBefore, weeksAfter });
 
@@ -232,70 +256,87 @@ export function Timeline() {
             Notifications
           </Link>
         </h1>
-        <fieldset>
-          <legend>Competitions</legend>
-          {competitions.major.map(({ key, label }) => (
-            <label key={key}>
-              <input type="checkbox" checked={selected.has(key)} onChange={() => toggle({ key })} />
-              {label}
-            </label>
-          ))}
-          {competitions.other.length > 0 && (
-            <details>
-              <summary>Other competitions ({competitions.other.length})</summary>
-              {competitions.other.map(({ key, label }) => (
-                <label key={key}>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(key)}
-                    onChange={() => toggle({ key })}
-                  />
-                  {label}
-                </label>
-              ))}
-            </details>
-          )}
-          <div>
-            <button onClick={() => setAll({ keys: majorKeys })}>Major</button>{" "}
-            <button
-              onClick={() =>
-                setAll({ keys: [...competitions.major, ...competitions.other].map((c) => c.key) })
-              }
-            >
-              All
-            </button>{" "}
-            <button onClick={() => setAll({ keys: [] })}>None</button>
-          </div>
-        </fieldset>
-        <label>
-          Team{" "}
-          <input
-            type="search"
-            list="teams"
-            value={team}
-            placeholder="Any team"
-            onChange={(e) => void setTeam(e.target.value)}
-          />
-          <datalist id="teams">
-            {teams.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-        </label>
-        {teamMode && (
-          <>
+        <details
+          className="filters"
+          open={filtersOpen}
+          onToggle={(e) => setFiltersOpen({ open: e.currentTarget.open })}
+        >
+          <summary>
+            Filters{" "}
             <small>
-              {" "}
-              All matches {teamMatches.from.toLocaleDateString()} –{" "}
-              {teamMatches.to.toLocaleDateString()}
-            </small>{" "}
-            <FollowButton
-              label={teamName}
-              targets={teamIds.map((id) => ({ kind: "team", target: id, label: teamName }))}
+              {comp.length === 1 ? "1 competition" : `${comp.length} competitions`}
+              {team.trim() && ` · ${team.trim()}`}
+            </small>
+          </summary>
+          <fieldset>
+            <legend>Competitions</legend>
+            {competitions.major.map(({ key, label }) => (
+              <label key={key}>
+                <input
+                  type="checkbox"
+                  checked={selected.has(key)}
+                  onChange={() => toggle({ key })}
+                />
+                {label}
+              </label>
+            ))}
+            {competitions.other.length > 0 && (
+              <details>
+                <summary>Other competitions ({competitions.other.length})</summary>
+                {competitions.other.map(({ key, label }) => (
+                  <label key={key}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(key)}
+                      onChange={() => toggle({ key })}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </details>
+            )}
+            <div>
+              <button onClick={() => setAll({ keys: majorKeys })}>Major</button>{" "}
+              <button
+                onClick={() =>
+                  setAll({ keys: [...competitions.major, ...competitions.other].map((c) => c.key) })
+                }
+              >
+                All
+              </button>{" "}
+              <button onClick={() => setAll({ keys: [] })}>None</button>
+            </div>
+          </fieldset>
+          <label>
+            Team{" "}
+            <input
+              type="search"
+              list="teams"
+              value={team}
+              placeholder="Any team"
+              onChange={(e) => void setTeam(e.target.value)}
             />
-            <PushHint />
-          </>
-        )}
+            <datalist id="teams">
+              {teams.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+          </label>
+          {teamMode && (
+            <>
+              <small>
+                {" "}
+                All matches {teamMatches.from.toLocaleDateString()} –{" "}
+                {teamMatches.to.toLocaleDateString()}
+              </small>{" "}
+              <FollowButton
+                label={teamName}
+                targets={teamIds.map((id) => ({ kind: "team", target: id, label: teamName }))}
+              />
+              <PushHint />
+            </>
+          )}
+        </details>
       </header>
 
       <main>
