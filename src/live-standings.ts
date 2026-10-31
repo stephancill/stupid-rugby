@@ -103,6 +103,61 @@ export function matchPoints({
   return { result, points: (result === "won" ? 4 : result === "drawn" ? 2 : 0) + bonus, bonus };
 }
 
+// Each team's record from completed league matches, to recognise its standings row.
+function leagueRecords({ league }: { league: Match[] }) {
+  const records = new Map<string, Record>();
+  for (const m of league.filter((x) => x.phase === "complete")) {
+    for (const [team, opponent] of [
+      [m.home, m.away],
+      [m.away, m.home],
+    ] as const) {
+      const r = records.get(team.id) ?? { played: 0, pointsFor: 0, pointsAgainst: 0 };
+      records.set(team.id, {
+        played: r.played + 1,
+        pointsFor: r.pointsFor + team.score,
+        pointsAgainst: r.pointsAgainst + opponent.score,
+      });
+    }
+  }
+  return records;
+}
+
+// The matches' (World Rugby) name for each standings team, keyed by standings name: the
+// team with the same record, with name similarity breaking ties. Standings can lag the
+// latest results, so with no team on the same record the most similar name is used.
+// Teams that can't be told apart are left out.
+export function matchTeamNames({
+  standings,
+  matches,
+}: {
+  standings: Standings;
+  matches: Match[];
+}): Map<string, string> {
+  const records = leagueRecords({ league: matches.filter((m) => isLeagueMatch({ match: m })) });
+  const teams = [
+    ...new Map(matches.flatMap((m) => [m.home, m.away]).map((t) => [t.id, t])).values(),
+  ];
+  const names = new Map<string, string>();
+  for (const row of standings.groups.flatMap((g) => g.rows)) {
+    const sameRecord = teams.filter(
+      (t) =>
+        recordKey({
+          record: records.get(t.id) ?? { played: 0, pointsFor: 0, pointsAgainst: 0 },
+        }) === recordKey({ record: row }),
+    );
+    if (sameRecord.length === 1) {
+      names.set(row.team, sameRecord[0]!.name);
+      continue;
+    }
+    const ranked = (sameRecord.length > 0 ? sameRecord : teams)
+      .map((t) => ({ name: t.name, score: similarity({ a: row.team, b: t.name }) }))
+      .sort((a, b) => b.score - a.score);
+    const [best, next] = ranked;
+    if (best && best.score > 0 && best.score !== next?.score) names.set(row.team, best.name);
+  }
+  return names;
+}
+
 export function projectStandings({
   standings,
   matches,
@@ -119,21 +174,7 @@ export function projectStandings({
   const league = matches.filter((m) => isLeagueMatch({ match: m }));
   const liveMatches = league.filter((m) => m.phase === "live");
 
-  // Each team's record from completed league matches, to recognise its standings row.
-  const records = new Map<string, Record>();
-  for (const m of league.filter((x) => x.phase === "complete")) {
-    for (const [team, opponent] of [
-      [m.home, m.away],
-      [m.away, m.home],
-    ] as const) {
-      const r = records.get(team.id) ?? { played: 0, pointsFor: 0, pointsAgainst: 0 };
-      records.set(team.id, {
-        played: r.played + 1,
-        pointsFor: r.pointsFor + team.score,
-        pointsAgainst: r.pointsAgainst + opponent.score,
-      });
-    }
-  }
+  const records = leagueRecords({ league });
 
   const rows = standings.groups.flatMap((group, g) => group.rows.map((row) => ({ g, row })));
   const used = new Set<StandingsRow>();

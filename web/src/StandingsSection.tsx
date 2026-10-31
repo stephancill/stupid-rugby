@@ -1,9 +1,10 @@
 import { useQueries } from "@tanstack/react-query";
 import { parseAsStringLiteral, useQueryState } from "nuqs";
 import { useMemo } from "react";
+import { Link } from "react-router";
 import { bonusRules } from "../../src/competitions.ts";
 import { liveClock } from "../../src/match-clock.ts";
-import { type LiveTeam, projectStandings } from "../../src/live-standings.ts";
+import { type LiveTeam, matchTeamNames, projectStandings } from "../../src/live-standings.ts";
 import type { Standings } from "../../src/standings.ts";
 import type { Match } from "../../src/worldrugby.ts";
 import { fetchMatchSummary } from "./api.ts";
@@ -29,11 +30,16 @@ function StandingsTables({
   standings,
   live,
   official,
+  teamNames,
+  competitionKey,
 }: {
   standings: Standings;
   live: Map<string, LiveTeam>;
   // Official positions by team, to show movement in the projected table.
   official: Map<string, number> | null;
+  // Standings name → the matches' name, which the timeline's team filter uses.
+  teamNames: Map<string, string>;
+  competitionKey: string;
 }) {
   return (
     <>
@@ -71,7 +77,14 @@ function StandingsTables({
                     )}
                   </td>
                   <td className="team-col">
-                    {row.team}
+                    <Link
+                      to={{
+                        pathname: "/",
+                        search: `?${new URLSearchParams({ comp: competitionKey, team: teamNames.get(row.team) ?? row.team })}`,
+                      }}
+                    >
+                      {row.team}
+                    </Link>
                     {playing && <LiveNote live={playing} />}
                   </td>
                   <td>{row.played}</td>
@@ -143,6 +156,7 @@ export function StandingsSection({
     () => new Map(standings.groups.flatMap((g) => g.rows.map((r) => [r.team, r.position]))),
     [standings],
   );
+  const teamNames = useMemo(() => matchTeamNames({ standings, matches }), [standings, matches]);
   const pendingTries = asItStands && summaries.some((s) => s.isPending);
   const summaryError = summaries.find((s) => s.error)?.error;
 
@@ -167,6 +181,8 @@ export function StandingsSection({
         standings={asItStands ? projected.standings : standings}
         live={projected.live}
         official={asItStands ? official : null}
+        teamNames={teamNames}
+        competitionKey={competitionKey}
       />
       {asItStands && (
         <p className="source">

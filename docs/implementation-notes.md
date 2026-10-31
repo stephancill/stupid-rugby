@@ -27,6 +27,7 @@ See `docs/research.md` for source evaluation.
   - Seasons come from `/api/seasons` (every indexed season), filtered by each major competition's `seasons` label pattern in `src/competitions.ts`. Non-major competitions have no pattern and rely on the linked `?season=` id.
   - Without `?season=`, `currentSeason` picks the season in progress, else the latest started, else the next.
   - Fixtures, results and standings come from `/api/seasons/:id` in one request. Standings are null when neither World Rugby nor ESPN has a table for the season, and the page says so rather than showing another season's table.
+  - Standings team names link to the timeline filtered to that competition and team (`/?comp=<key>&team=<name>`). The team filter matches World Rugby names, so `matchTeamNames` (`src/live-standings.ts`) maps each standings (often ESPN) name to the season's match name: the team on the same record, name similarity breaking ties, or the most similar name when standings lag the latest results. Unmapped teams link with the standings name. Checked against the current Top 14: all 14 rows mapped correctly, 10 of them to a different name ("Pau" → "Section Paloise").
 - Shared modules: `src/http.ts` (`getJson`, `isRateLimited`), `src/standings.ts` (normalized `Standings`), `src/espn.ts` (`createEspnClient`).
 
 ## As it stands (`src/live-standings.ts`, `web/src/StandingsSection.tsx`)
