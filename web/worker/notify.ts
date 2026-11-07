@@ -1,6 +1,7 @@
 import { buildPushHTTPRequest } from "@pushforge/builder";
 import { z } from "zod";
 import { baseLabel } from "../../src/competitions.ts";
+import type { Score } from "../../src/score-compare.ts";
 import type { Incident, Match } from "../../src/worldrugby.ts";
 
 // Web Push notifications for followed teams, matches and competitions. The index detects
@@ -31,16 +32,53 @@ const SEND_CONCURRENCY = 6;
 
 export type PushPayload = { title: string; body: string; url: string; tag: string };
 
+// Score events are not derived here but by scoreAlertStep, against the last score alerted.
 export function matchEvents({ before, after }: { before: Match; after: Match }): MatchEventKind[] {
   const events: MatchEventKind[] = [];
   if (before.phase === "scheduled" && after.phase === "live") events.push("kickoff");
   if (after.phase === "complete" && before.phase !== "complete") return [...events, "full-time"];
   if (after.phase !== "live") return events;
-  if (after.home.score !== before.home.score || after.away.score !== before.away.score) {
-    events.push("score");
-  }
   if (after.state === "LHT" && before.state !== "LHT") events.push("half-time");
   return events;
+}
+
+// How long a score with no side up on the last alert (points taken back) must hold before
+// it is alerted. World Rugby's live feed flaps between versions for minutes at a time
+// (7-52, 0-52, 7-52, 2-52, 0-52 over six minutes), so a drop is only believed once it sticks.
+export const CORRECTION_CONFIRM_MS = 5 * 60 * 1000;
+
+export type ScoreAlertState = {
+  // The score subscribers were last told.
+  alerted: Score;
+  // A lower score waiting to be confirmed, and when it was first seen.
+  pending: { score: Score; since: number } | null;
+};
+
+const sameScore = (a: Score, b: Score) => a.home === b.home && a.away === b.away;
+
+// Decides, at each live poll, whether the current score is alerted. A score with either side
+// up on the last alert goes out straight away; a return to the alerted score is silent (the
+// feed flapped back); a drop is held until it has stood for CORRECTION_CONFIRM_MS.
+export function scoreAlertStep({
+  state,
+  current,
+  now,
+}: {
+  state: ScoreAlertState;
+  current: Score;
+  now: number;
+}): { state: ScoreAlertState; alert: boolean } {
+  const { alerted, pending } = state;
+  if (sameScore(current, alerted)) return { state: { alerted, pending: null }, alert: false };
+  const rose = current.home > alerted.home || current.away > alerted.away;
+  if (
+    rose ||
+    (pending && sameScore(pending.score, current) && now - pending.since >= CORRECTION_CONFIRM_MS)
+  ) {
+    return { state: { alerted: current, pending: null }, alert: true };
+  }
+  if (pending && sameScore(pending.score, current)) return { state, alert: false };
+  return { state: { alerted, pending: { score: current, since: now } }, alert: false };
 }
 
 const incidentPoints: Partial<Record<Incident["kind"], number>> = {

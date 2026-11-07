@@ -25,6 +25,8 @@ import {
   type MatchEventKind,
   payloadFor,
   type PushSubscriptionJson,
+  scoreAlertStep,
+  type ScoreAlertState,
   scoringIncidents,
   sendPushes,
 } from "./notify.ts";
@@ -165,6 +167,14 @@ const SCHEMA = `
     ahead TEXT
   );
   CREATE INDEX IF NOT EXISTS score_divergences_open ON score_divergences (match_id, ended_at);
+  -- Per live match, the score last alerted and any lower score awaiting confirmation (see
+  -- notifyScores). Scores are "home-away".
+  CREATE TABLE IF NOT EXISTS score_alerts (
+    match_id TEXT PRIMARY KEY,
+    alerted TEXT NOT NULL,
+    pending TEXT,
+    pending_since INTEGER
+  );
 `;
 
 // Weeks are UTC Mondays, like the client's.
@@ -330,6 +340,68 @@ export class Indexer extends DurableObject<Env> {
           console.error(`Notification ${kind} ${after.id} failed`, error);
           this.recordError({ message: `notify ${kind} ${after.id}: ${(error as Error).message}` });
         }
+      }
+    }
+  }
+
+  // Score alerts, run after every live poll (not only on changes, so a held correction can
+  // be confirmed while the feed sits still). Compares each live match with the score last
+  // alerted rather than the previous poll, so a feed flapping between versions is silent.
+  async notifyScores({ now }: { now: number }) {
+    this.sql.exec(
+      "DELETE FROM score_alerts WHERE match_id NOT IN (SELECT id FROM matches WHERE phase = 'live')",
+    );
+    const rows = this.sql
+      .exec<{
+        json: string;
+        alerted: string | null;
+        pending: string | null;
+        pending_since: number | null;
+      }>(
+        `SELECT m.json, a.alerted, a.pending, a.pending_since FROM matches m
+         LEFT JOIN score_alerts a ON a.match_id = m.id
+         WHERE m.phase = 'live' AND m.kickoff BETWEEN ? AND ?`,
+        now - NOTIFY_WITHIN_MS,
+        now + NOTIFY_WITHIN_MS,
+      )
+      .toArray();
+    const parse = (s: string) => {
+      const [home, away] = s.split("-").map(Number);
+      return { home, away };
+    };
+    const format = ({ home, away }: { home: number; away: number }) => `${home}-${away}`;
+    for (const row of rows) {
+      const match = toMatch({ json: row.json });
+      const current = { home: match.home.score, away: match.away.score };
+      // First live sighting (kickoff, or a deploy mid-match): start from the current score.
+      const state: ScoreAlertState = row.alerted
+        ? {
+            alerted: parse(row.alerted),
+            pending:
+              row.pending && row.pending_since !== null
+                ? { score: parse(row.pending), since: row.pending_since }
+                : null,
+          }
+        : { alerted: current, pending: null };
+      const step = scoreAlertStep({ state, current, now });
+      this.sql.exec(
+        "INSERT OR REPLACE INTO score_alerts (match_id, alerted, pending, pending_since) VALUES (?, ?, ?, ?)",
+        match.id,
+        format(step.state.alerted),
+        step.state.pending ? format(step.state.pending.score) : null,
+        step.state.pending?.since ?? null,
+      );
+      if (!step.alert) continue;
+      const before = {
+        ...match,
+        home: { ...match.home, score: state.alerted.home },
+        away: { ...match.away, score: state.alerted.away },
+      };
+      try {
+        await this.notifyEvent({ kind: "score", before, after: match });
+      } catch (error) {
+        console.error(`Notification score ${match.id} failed`, error);
+        this.recordError({ message: `notify score ${match.id}: ${(error as Error).message}` });
       }
     }
   }
@@ -559,6 +631,7 @@ export class Indexer extends DurableObject<Env> {
         }),
     });
     await this.afterSave(this.saveMatches({ matches }));
+    await this.notifyScores({ now: Date.now() });
     try {
       await this.compareEspn();
     } catch (error) {
