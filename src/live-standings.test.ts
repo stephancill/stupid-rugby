@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { type BonusRules, matchPoints, projectStandings, standardBonus } from "./live-standings.ts";
+import {
+  type BonusRules,
+  matchPoints,
+  matchTeamNames,
+  projectStandings,
+  standardBonus,
+  unrecordedMatches,
+} from "./live-standings.ts";
 import type { Standings, StandingsRow } from "./standings.ts";
 import type { Match } from "./worldrugby.ts";
 
@@ -63,7 +70,8 @@ function match(
     competition: "Top 14 2027",
     competitionId: "s",
     round: "Round 1",
-    kickoff: new Date(),
+    // In creation order.
+    kickoff: new Date(ids * 60_000),
     venue: null,
     home: { id: home[0], name: home[1], score: home[2] },
     away: { id: away[0], name: away[1], score: away[2] },
@@ -181,5 +189,72 @@ describe("projectStandings", () => {
       rules: top14,
     });
     expect(result.live.size).toBe(0);
+  });
+
+  test("applies completed results the official table is missing", () => {
+    // Round 2 is over, but the table still shows round 1. Toulon beat Bordeaux 27-3 with 4
+    // tries to 0; Pau beat La Rochelle 20-15.
+    const round2 = [
+      match(["tl", "RC Toulonnais", 27], ["bb", "Union Bordeaux-Begles", 3], "complete"),
+      match(["pau", "Section Paloise", 20], ["lr", "Stade Rochelais", 15], "complete"),
+    ];
+    const matches = [...done, ...round2];
+    expect(unrecordedMatches({ standings, matches }).map((m) => m.id)).toEqual(
+      round2.map((m) => m.id),
+    );
+    const result = projectStandings({
+      standings,
+      matches,
+      tries: new Map([[round2[0]!.id, { home: 4, away: 0 }]]),
+      rules: top14,
+    });
+    expect(result.unplaced).toEqual([]);
+    expect(result.live.size).toBe(0);
+    expect(result.unrecorded.get("Toulon")?.map((r) => r.match.id)).toEqual([round2[0]!.id]);
+    expect(
+      result.standings.groups[0]!.rows.map((r) => [r.position, r.team, r.played, r.points]),
+    ).toEqual([
+      [1, "Toulon", 2, 5],
+      // Level with Pau, but +5 to Pau's 0.
+      [2, "La Rochelle", 2, 5],
+      [3, "Pau", 2, 5],
+      [4, "Bordeaux Begles", 2, 4],
+    ]);
+    // Teams keep their names for the timeline filter.
+    expect(matchTeamNames({ standings, matches }).get("Pau")).toBe("Section Paloise");
+  });
+
+  test("applies unrecorded results and live matches together", () => {
+    const round2 = match(
+      ["tl", "RC Toulonnais", 27],
+      ["bb", "Union Bordeaux-Begles", 3],
+      "complete",
+    );
+    const live = match(["pau", "Section Paloise", 7], ["lr", "Stade Rochelais", 0], "live");
+    const result = projectStandings({
+      standings,
+      matches: [...done, round2, live],
+      tries: new Map(),
+      rules: top14,
+    });
+    expect(result.unplaced).toEqual([]);
+    expect([...result.unrecorded.keys()].sort()).toEqual(["Bordeaux Begles", "Toulon"]);
+    expect([...result.live.keys()].sort()).toEqual(["La Rochelle", "Pau"]);
+    expect(result.standings.groups[0]!.rows.every((r) => r.played === 2)).toBe(true);
+  });
+
+  test("an up-to-date table has nothing unrecorded", () => {
+    expect(unrecordedMatches({ standings, matches: done })).toEqual([]);
+  });
+
+  test("matches past leagueGames don't count", () => {
+    // One league match each, then a placement match the table never includes.
+    const placement = match(["tl", "RC Toulonnais", 30], ["lr", "Stade Rochelais", 0], "complete");
+    expect(unrecordedMatches({ standings, matches: [...done, placement], leagueGames: 1 })).toEqual(
+      [],
+    );
+    expect(
+      unrecordedMatches({ standings, matches: [...done, placement] }).map((m) => m.id),
+    ).toEqual([placement.id]);
   });
 });

@@ -2,15 +2,22 @@ import { useQueries } from "@tanstack/react-query";
 import { parseAsStringLiteral, useQueryState } from "nuqs";
 import { useMemo } from "react";
 import { Link } from "react-router";
-import { bonusRules } from "../../src/competitions.ts";
+import { bonusRules, leagueGames } from "../../src/competitions.ts";
 import { liveClock } from "../../src/match-clock.ts";
-import { type LiveTeam, matchTeamNames, projectStandings } from "../../src/live-standings.ts";
+import {
+  type LiveTeam,
+  matchTeamNames,
+  projectStandings,
+  type UnrecordedResult,
+  unrecordedMatches,
+} from "../../src/live-standings.ts";
 import type { Standings } from "../../src/standings.ts";
 import type { Match } from "../../src/worldrugby.ts";
 import { fetchMatchSummary } from "./api.ts";
 import { useNow } from "./now.ts";
 
-const tableParser = parseAsStringLiteral(["official", "live"] as const).withDefault("official");
+// No default: it depends on whether the official table is behind (see StandingsSection).
+const tableParser = parseAsStringLiteral(["official", "live"] as const);
 
 function LiveNote({ live }: { live: LiveTeam }) {
   const { match, side } = live;
@@ -26,15 +33,34 @@ function LiveNote({ live }: { live: LiveTeam }) {
   );
 }
 
+// Results counted in the projected table that the official one doesn't have yet.
+function UnrecordedNote({ results }: { results: UnrecordedResult[] }) {
+  return (
+    <small>
+      {" "}
+      incl.{" "}
+      {results
+        .map(({ match, side }) => {
+          const opponent = match[side === "home" ? "away" : "home"];
+          return `${match[side].score}–${opponent.score} v ${opponent.name}`;
+        })
+        .join(", ")}
+    </small>
+  );
+}
+
 function StandingsTables({
   standings,
   live,
+  unrecorded,
   official,
   teamNames,
   competitionKey,
 }: {
   standings: Standings;
   live: Map<string, LiveTeam>;
+  // Shown only in the projected table; empty otherwise.
+  unrecorded: Map<string, UnrecordedResult[]>;
   // Official positions by team, to show movement in the projected table.
   official: Map<string, number> | null;
   // Standings name → the matches' name, which the timeline's team filter uses.
@@ -65,6 +91,7 @@ function StandingsTables({
             {group.rows.map((row) => {
               const diff = row.pointsFor - row.pointsAgainst;
               const playing = live.get(row.team);
+              const added = unrecorded.get(row.team);
               const moved = official ? (official.get(row.team) ?? row.position) - row.position : 0;
               return (
                 <tr key={row.team} className={playing ? "playing" : undefined}>
@@ -85,6 +112,7 @@ function StandingsTables({
                     >
                       {row.team}
                     </Link>
+                    {added && <UnrecordedNote results={added} />}
                     {playing && <LiveNote live={playing} />}
                   </td>
                   <td>{row.played}</td>
@@ -108,8 +136,10 @@ function StandingsTables({
   );
 }
 
-// Official standings, plus an "as it stands" view with in-progress matches applied as if
-// they ended now (src/live-standings.ts). Teams playing are highlighted in both.
+// Official standings, plus an "as it stands" view with completed results the official table
+// is missing and in-progress matches applied as if they ended now (src/live-standings.ts).
+// When the official table is behind, "as it stands" is the default. Teams playing are
+// highlighted in both.
 export function StandingsSection({
   standings,
   matches,
@@ -120,16 +150,24 @@ export function StandingsSection({
   competitionKey: string;
 }) {
   const [table, setTable] = useQueryState("table", tableParser);
+  const games = leagueGames({ key: competitionKey });
   const liveMatches = useMemo(() => matches.filter((m) => m.phase === "live"), [matches]);
-  const asItStands = table === "live" && liveMatches.length > 0;
+  const unrecorded = useMemo(
+    () => unrecordedMatches({ standings, matches, leagueGames: games }),
+    [standings, matches, games],
+  );
+  const hasProjection = liveMatches.length > 0 || unrecorded.length > 0;
+  const shown = table ?? (unrecorded.length > 0 ? "live" : "official");
+  const asItStands = shown === "live" && hasProjection;
 
-  // Try counts for bonus points, from each live match's summary.
+  // Try counts for bonus points, from each live or unrecorded match's summary.
+  const tryMatches = [...unrecorded, ...liveMatches];
   const summaries = useQueries({
-    queries: liveMatches.map((m) => ({
+    queries: tryMatches.map((m) => ({
       queryKey: ["match-summary", m.id],
       queryFn: () => fetchMatchSummary({ id: m.id }),
       enabled: asItStands,
-      refetchInterval: 15_000,
+      refetchInterval: m.phase === "live" ? 15_000 : false,
     })),
   });
   const tries = new Map<string, { home: number; away: number }>();
@@ -138,7 +176,7 @@ export function StandingsSection({
     if (!incidents) return;
     const count = (team: "home" | "away") =>
       incidents.filter((x) => x.kind === "try" && x.team === team).length;
-    tries.set(liveMatches[i]!.id, { home: count("home"), away: count("away") });
+    tries.set(tryMatches[i]!.id, { home: count("home"), away: count("away") });
   });
   const triesKey = JSON.stringify([...tries]);
 
@@ -149,27 +187,31 @@ export function StandingsSection({
         matches,
         tries: new Map(JSON.parse(triesKey) as [string, { home: number; away: number }][]),
         rules: bonusRules({ key: competitionKey }),
+        leagueGames: games,
       }),
-    [standings, matches, triesKey, competitionKey],
+    [standings, matches, triesKey, competitionKey, games],
   );
   const official = useMemo(
     () => new Map(standings.groups.flatMap((g) => g.rows.map((r) => [r.team, r.position]))),
     [standings],
   );
-  const teamNames = useMemo(() => matchTeamNames({ standings, matches }), [standings, matches]);
+  const teamNames = useMemo(
+    () => matchTeamNames({ standings, matches, leagueGames: games }),
+    [standings, matches, games],
+  );
   const pendingTries = asItStands && summaries.some((s) => s.isPending);
   const summaryError = summaries.find((s) => s.error)?.error;
 
   return (
     <>
-      {liveMatches.length > 0 && (
+      {hasProjection && (
         <p className="table-toggle">
           {(["official", "live"] as const).map((value) => (
             <label key={value}>
               <input
                 type="radio"
                 name="table"
-                checked={table === value}
+                checked={shown === value}
                 onChange={() => void setTable(value)}
               />
               {value === "official" ? "Official" : "As it stands"}
@@ -180,15 +222,19 @@ export function StandingsSection({
       <StandingsTables
         standings={asItStands ? projected.standings : standings}
         live={projected.live}
+        unrecorded={asItStands ? projected.unrecorded : new Map()}
         official={asItStands ? official : null}
         teamNames={teamNames}
         competitionKey={competitionKey}
       />
       {asItStands && (
         <p className="source">
-          As it stands: live matches counted as if they ended now, including bonus points. Teams
-          playing are placed by points, then points difference, then points for; the rest keep their
-          official order.
+          As it stands:{" "}
+          {unrecorded.length > 0 &&
+            `${unrecorded.length} ${unrecorded.length === 1 ? "result" : "results"} the official table doesn't include yet${liveMatches.length > 0 ? " and " : " "}`}
+          {liveMatches.length > 0 && "live matches as if they ended now "}
+          counted, including bonus points. Teams with new results are placed by points, then points
+          difference, then points for; the rest keep their official order.
           {pendingTries && " Try bonus points are loading."}
         </p>
       )}

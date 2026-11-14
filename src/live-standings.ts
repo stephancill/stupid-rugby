@@ -1,13 +1,16 @@
 import type { Standings, StandingsRow } from "./standings.ts";
 import type { Match } from "./worldrugby.ts";
 
-// "As it stands": official standings with in-progress matches applied as if they ended now.
+// "As it stands": official standings with in-progress matches applied as if they ended now,
+// and with completed results the official table doesn't include yet (World Rugby's table
+// can lag its own results by days, until a whole round is in).
 //
 // Standings (often from ESPN) and matches (World Rugby) name teams differently ("La
-// Rochelle" vs "Stade Rochelais"), so a live team is placed by its record instead: the
-// official row whose played / points for / points against equal that team's totals from
-// the season's completed league matches. Name similarity only breaks ties (e.g. before
-// anyone has played). Teams that still can't be placed are reported, not guessed.
+// Rochelle" vs "Stade Rochelais"), so a team is placed by its record instead: the official
+// row with P played whose played / points for / points against equal the team's totals
+// from its first P completed league matches. Results after those are the ones the table is
+// missing. Name similarity only breaks ties (e.g. before anyone has played). Teams that
+// still can't be placed are reported, not guessed.
 
 export type BonusRules = {
   // "tries": a bonus for scoring `min` tries, whatever the result. "margin": a bonus for
@@ -26,10 +29,15 @@ export type LiveTeam = {
   officialPosition: number;
 };
 
+// A completed result the official table doesn't include yet.
+export type UnrecordedResult = { match: Match; side: "home" | "away" };
+
 export type ProjectedStandings = {
   standings: Standings;
   // Keyed by standings team name.
   live: Map<string, LiveTeam>;
+  // Keyed by standings team name, oldest first.
+  unrecorded: Map<string, UnrecordedResult[]>;
   // Live teams that couldn't be matched to a standings row.
   unplaced: string[];
 };
@@ -103,53 +111,124 @@ export function matchPoints({
   return { result, points: (result === "won" ? 4 : result === "drawn" ? 2 : 0) + bonus, bonus };
 }
 
-// Each team's record from completed league matches, to recognise its standings row.
-function leagueRecords({ league }: { league: Match[] }) {
-  const records = new Map<string, Record>();
-  for (const m of league.filter((x) => x.phase === "complete")) {
-    for (const [team, opponent] of [
-      [m.home, m.away],
-      [m.away, m.home],
-    ] as const) {
-      const r = records.get(team.id) ?? { played: 0, pointsFor: 0, pointsAgainst: 0 };
-      records.set(team.id, {
-        played: r.played + 1,
-        pointsFor: r.pointsFor + team.score,
-        pointsAgainst: r.pointsAgainst + opponent.score,
-      });
+type Team = { id: string; name: string };
+
+// The teams in the season's completed or live league matches, each with its completed
+// league results, oldest first. `leagueGames` caps the results that count (later ones are
+// placement matches the table never includes).
+function teamResults({ matches, leagueGames }: { matches: Match[]; leagueGames?: number }) {
+  const league = matches
+    .filter((m) => isLeagueMatch({ match: m }) && (m.phase === "complete" || m.phase === "live"))
+    .toSorted((a, b) => a.kickoff.getTime() - b.kickoff.getTime());
+  const teams = new Map<string, { team: Team; results: UnrecordedResult[] }>();
+  for (const match of league) {
+    for (const side of ["home", "away"] as const) {
+      const team = match[side];
+      const entry = teams.get(team.id) ?? { team: { id: team.id, name: team.name }, results: [] };
+      teams.set(team.id, entry);
+      if (match.phase !== "complete") continue;
+      if (leagueGames === undefined || entry.results.length < leagueGames) {
+        entry.results.push({ match, side });
+      }
     }
   }
-  return records;
+  return [...teams.values()];
 }
 
-// The matches' (World Rugby) name for each standings team, keyed by standings name: the
-// team with the same record, with name similarity breaking ties. Standings can lag the
-// latest results, so with no team on the same record the most similar name is used.
-// Teams that can't be told apart are left out.
-export function matchTeamNames({
+function recordOf({ results }: { results: UnrecordedResult[] }): Record {
+  let pointsFor = 0;
+  let pointsAgainst = 0;
+  for (const { match, side } of results) {
+    pointsFor += match[side].score;
+    pointsAgainst += match[side === "home" ? "away" : "home"].score;
+  }
+  return { played: results.length, pointsFor, pointsAgainst };
+}
+
+type Placement = { team: Team; g: number; row: StandingsRow; unrecorded: UnrecordedResult[] };
+
+// Each team's standings row (see the top of this file), keyed by team id. Teams with the
+// fewest candidate rows are placed first.
+function placeTeams({
   standings,
   matches,
+  leagueGames,
 }: {
   standings: Standings;
   matches: Match[];
+  leagueGames?: number;
+}) {
+  const rows = standings.groups.flatMap((group, g) => group.rows.map((row) => ({ g, row })));
+  const candidates = teamResults({ matches, leagueGames })
+    .map(({ team, results }) => ({
+      team,
+      results,
+      options: rows.filter(
+        ({ row }) =>
+          row.played <= results.length &&
+          recordKey({ record: recordOf({ results: results.slice(0, row.played) }) }) ===
+            recordKey({ record: row }),
+      ),
+    }))
+    .sort((a, b) => a.options.length - b.options.length);
+  const used = new Set<StandingsRow>();
+  const placed = new Map<string, Placement>();
+  for (const { team, results, options } of candidates) {
+    const ranked = options
+      .filter(({ row }) => !used.has(row))
+      .map((option) => ({ ...option, score: similarity({ a: option.row.team, b: team.name }) }))
+      .sort((a, b) => b.score - a.score);
+    const [best, next] = ranked;
+    // A unique record is enough; otherwise the name has to settle it.
+    if (!best || (next && (best.score === 0 || best.score === next.score))) continue;
+    used.add(best.row);
+    placed.set(team.id, {
+      team,
+      g: best.g,
+      row: best.row,
+      unrecorded: results.slice(best.row.played),
+    });
+  }
+  return placed;
+}
+
+// Completed league matches the official table doesn't include yet, oldest first.
+export function unrecordedMatches({
+  standings,
+  matches,
+  leagueGames,
+}: {
+  standings: Standings;
+  matches: Match[];
+  leagueGames?: number;
+}): Match[] {
+  const found = new Map<string, Match>();
+  for (const { unrecorded } of placeTeams({ standings, matches, leagueGames }).values()) {
+    for (const { match } of unrecorded) found.set(match.id, match);
+  }
+  return [...found.values()].sort((a, b) => a.kickoff.getTime() - b.kickoff.getTime());
+}
+
+// The matches' (World Rugby) name for each standings team, keyed by standings name: the
+// placed team (see the top of this file), else the uniquely most similar name. Teams that
+// can't be told apart are left out.
+export function matchTeamNames({
+  standings,
+  matches,
+  leagueGames,
+}: {
+  standings: Standings;
+  matches: Match[];
+  leagueGames?: number;
 }): Map<string, string> {
-  const records = leagueRecords({ league: matches.filter((m) => isLeagueMatch({ match: m })) });
+  const placed = placeTeams({ standings, matches, leagueGames });
+  const names = new Map([...placed.values()].map((p) => [p.row.team, p.team.name]));
   const teams = [
     ...new Map(matches.flatMap((m) => [m.home, m.away]).map((t) => [t.id, t])).values(),
   ];
-  const names = new Map<string, string>();
   for (const row of standings.groups.flatMap((g) => g.rows)) {
-    const sameRecord = teams.filter(
-      (t) =>
-        recordKey({
-          record: records.get(t.id) ?? { played: 0, pointsFor: 0, pointsAgainst: 0 },
-        }) === recordKey({ record: row }),
-    );
-    if (sameRecord.length === 1) {
-      names.set(row.team, sameRecord[0]!.name);
-      continue;
-    }
-    const ranked = (sameRecord.length > 0 ? sameRecord : teams)
+    if (names.has(row.team)) continue;
+    const ranked = teams
       .map((t) => ({ name: t.name, score: similarity({ a: row.team, b: t.name }) }))
       .sort((a, b) => b.score - a.score);
     const [best, next] = ranked;
@@ -163,85 +242,83 @@ export function projectStandings({
   matches,
   tries,
   rules,
+  leagueGames,
 }: {
   standings: Standings;
   // The season's matches.
   matches: Match[];
-  // Tries scored in each live match, by match id; missing means unknown.
+  // Tries scored in each live or unrecorded match, by match id; missing means unknown.
   tries: Map<string, { home: number; away: number }>;
   rules: BonusRules;
+  leagueGames?: number;
 }): ProjectedStandings {
-  const league = matches.filter((m) => isLeagueMatch({ match: m }));
-  const liveMatches = league.filter((m) => m.phase === "live");
-
-  const records = leagueRecords({ league });
-
-  const rows = standings.groups.flatMap((group, g) => group.rows.map((row) => ({ g, row })));
-  const used = new Set<StandingsRow>();
-  function place({ id, name }: { id: string; name: string }) {
-    const record = records.get(id) ?? { played: 0, pointsFor: 0, pointsAgainst: 0 };
-    const sameRecord = rows.filter(
-      ({ row }) => !used.has(row) && recordKey({ record: row }) === recordKey({ record }),
-    );
-    const ranked = sameRecord
-      .map((candidate) => ({ ...candidate, score: similarity({ a: candidate.row.team, b: name }) }))
-      .sort((a, b) => b.score - a.score);
-    const [best, next] = ranked;
-    // A unique record is enough; otherwise the name has to settle it.
-    if (!best || (next && (best.score === 0 || best.score === next.score))) return null;
-    used.add(best.row);
-    return best;
-  }
-
+  const placed = placeTeams({ standings, matches, leagueGames });
   const groups = standings.groups.map((group) => ({
     ...group,
     rows: group.rows.map((row) => ({ ...row })),
   }));
+  const rowFor = ({ placement }: { placement: Placement }) =>
+    groups[placement.g]!.rows.find((r) => r.team === placement.row.team)!;
+
+  function apply({ row, match, side }: { row: StandingsRow } & UnrecordedResult) {
+    const team = match[side];
+    const opponent = match[side === "home" ? "away" : "home"];
+    const matchTries = tries.get(match.id);
+    const { result, points, bonus } = matchPoints({
+      rules,
+      scored: team.score,
+      conceded: opponent.score,
+      tries: matchTries ? matchTries[side] : null,
+      opponentTries: matchTries ? matchTries[side === "home" ? "away" : "home"] : null,
+    });
+    Object.assign(row, {
+      played: row.played + 1,
+      won: row.won + (result === "won" ? 1 : 0),
+      drawn: row.drawn + (result === "drawn" ? 1 : 0),
+      lost: row.lost + (result === "lost" ? 1 : 0),
+      pointsFor: row.pointsFor + team.score,
+      pointsAgainst: row.pointsAgainst + opponent.score,
+      bonusPoints: row.bonusPoints + bonus,
+      points: row.points + points,
+    });
+  }
+
+  const unrecorded = new Map<string, UnrecordedResult[]>();
+  for (const placement of placed.values()) {
+    if (placement.unrecorded.length === 0) continue;
+    const row = rowFor({ placement });
+    unrecorded.set(row.team, placement.unrecorded);
+    for (const result of placement.unrecorded) apply({ row, ...result });
+  }
+
   const live = new Map<string, LiveTeam>();
   const unplaced: string[] = [];
+  const liveMatches = matches.filter((m) => isLeagueMatch({ match: m }) && m.phase === "live");
   for (const match of liveMatches) {
     for (const side of ["home", "away"] as const) {
-      const team = match[side];
-      const opponent = match[side === "home" ? "away" : "home"];
-      const placed = place({ id: team.id, name: team.name });
-      if (!placed) {
-        unplaced.push(team.name);
+      const placement = placed.get(match[side].id);
+      if (!placement) {
+        unplaced.push(match[side].name);
         continue;
       }
-      const row = groups[placed.g]!.rows.find((r) => r.team === placed.row.team)!;
-      const matchTries = tries.get(match.id);
-      const { result, points, bonus } = matchPoints({
-        rules,
-        scored: team.score,
-        conceded: opponent.score,
-        tries: matchTries ? matchTries[side] : null,
-        opponentTries: matchTries ? matchTries[side === "home" ? "away" : "home"] : null,
-      });
-      live.set(row.team, { match, side, officialPosition: row.position });
-      Object.assign(row, {
-        played: row.played + 1,
-        won: row.won + (result === "won" ? 1 : 0),
-        drawn: row.drawn + (result === "drawn" ? 1 : 0),
-        lost: row.lost + (result === "lost" ? 1 : 0),
-        pointsFor: row.pointsFor + team.score,
-        pointsAgainst: row.pointsAgainst + opponent.score,
-        bonusPoints: row.bonusPoints + bonus,
-        points: row.points + points,
-      });
+      const row = rowFor({ placement });
+      live.set(row.team, { match, side, officialPosition: placement.row.position });
+      apply({ row, match, side });
     }
   }
 
-  // Teams not playing keep their official order (official tie-breakers vary and aren't
-  // reproducible from the table). Each playing team is reinserted above the first team it
+  // Teams with no changes keep their official order (official tie-breakers vary and aren't
+  // reproducible from the table). Each changed team is reinserted above the first team it
   // beats on points, then points difference, then points for.
+  const changed = (row: StandingsRow) => live.has(row.team) || unrecorded.has(row.team);
   const ahead = (a: StandingsRow, b: StandingsRow) =>
     a.points - b.points ||
     a.pointsFor - a.pointsAgainst - (b.pointsFor - b.pointsAgainst) ||
     a.pointsFor - b.pointsFor;
   for (const group of groups) {
-    const playing = group.rows.filter((r) => live.has(r.team)).sort((a, b) => ahead(b, a));
-    const ordered = group.rows.filter((r) => !live.has(r.team));
-    for (const row of playing) {
+    const moving = group.rows.filter(changed).sort((a, b) => ahead(b, a));
+    const ordered = group.rows.filter((r) => !changed(r));
+    for (const row of moving) {
       const index = ordered.findIndex((other) => ahead(row, other) > 0);
       ordered.splice(index === -1 ? ordered.length : index, 0, row);
     }
@@ -250,5 +327,5 @@ export function projectStandings({
     });
     group.rows = ordered;
   }
-  return { standings: { ...standings, groups }, live, unplaced };
+  return { standings: { ...standings, groups }, live, unrecorded, unplaced };
 }

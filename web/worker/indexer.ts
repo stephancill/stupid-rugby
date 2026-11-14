@@ -1,7 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
-import { competitionKey, findCompetition, majorCompetitions } from "../../src/competitions.ts";
+import {
+  competitionKey,
+  findCompetition,
+  leagueGames,
+  majorCompetitions,
+} from "../../src/competitions.ts";
 import { createEspnClient, type EspnEvent } from "../../src/espn.ts";
 import { isRateLimited } from "../../src/http.ts";
+import { unrecordedMatches } from "../../src/live-standings.ts";
 import { withPeriodStart } from "../../src/match-clock.ts";
 import {
   divergenceStep,
@@ -55,6 +61,8 @@ const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
+// How long after a match a standings table still missing it is refetched hourly.
+const STANDINGS_LAG_MS = 3 * DAY;
 const WEEK = 7 * DAY;
 
 const LIVE_POLL_MS = 10 * SECOND;
@@ -885,6 +893,23 @@ export class Indexer extends DurableObject<Env> {
           standings && JSON.stringify(standings),
           now,
         );
+        // World Rugby's table can lag its results by days (until the whole round is in), and
+        // the daily refresh would leave it stale another day after that. Check hourly while
+        // the table is missing a result from the last few days.
+        if (standings) {
+          const matches = this.sql
+            .exec<{ json: string }>("SELECT json FROM matches WHERE season_id = ?", job.seasonId)
+            .toArray()
+            .map((r) => toMatch({ json: r.json }));
+          const missing = unrecordedMatches({
+            standings,
+            matches,
+            leagueGames: leagueGames({ key: major.key }),
+          });
+          if (missing.some((m) => m.kickoff.getTime() > now - STANDINGS_LAG_MS)) {
+            this.enqueue({ job, dueAt: now + HOUR });
+          }
+        }
         return;
       }
       case "sync-near": {

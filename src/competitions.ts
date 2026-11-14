@@ -5,7 +5,8 @@ import { type BonusRules, standardBonus } from "./live-standings.ts";
 //
 // `seasons` matches World Rugby event (season) labels, which can differ from match labels.
 // `espnId` is ESPN's league id, where ESPN publishes standings. `bonus` is the bonus point
-// system where it isn't the standard one (see bonusRules).
+// system where it isn't the standard one (see bonusRules). `leagueGames` is how many of
+// each team's matches count towards the table, where later ones don't (see leagueGames).
 export const majorCompetitions = [
   {
     key: "six-nations",
@@ -23,6 +24,9 @@ export const majorCompetitions = [
     key: "nations-championship",
     label: "Nations Championship",
     seasons: /^Nations Championship \d{4}$/,
+    // Six pool matches each, then a finals weekend that isn't in the table. World Rugby's
+    // matches carry no round, so the finals can't be told apart otherwise.
+    leagueGames: 6,
   },
   {
     key: "autumn-nations",
@@ -93,6 +97,7 @@ export const majorCompetitions = [
   seasons: RegExp;
   espnId?: number;
   bonus?: BonusRules;
+  leagueGames?: number;
 }[];
 
 export type CompetitionKey = (typeof majorCompetitions)[number]["key"];
@@ -127,6 +132,13 @@ export function findCompetitionByKey({ key }: { key: string }) {
 export function bonusRules({ key }: { key: string }): BonusRules {
   const competition = findCompetitionByKey({ key });
   return competition && "bonus" in competition ? competition.bonus : standardBonus;
+}
+
+// Matches per team that count towards the table; undefined when every non-knockout match
+// does.
+export function leagueGames({ key }: { key: string }): number | undefined {
+  const competition = findCompetitionByKey({ key });
+  return competition && "leagueGames" in competition ? competition.leagueGames : undefined;
 }
 
 // The season in progress, else the latest that has started, else the next to start.
