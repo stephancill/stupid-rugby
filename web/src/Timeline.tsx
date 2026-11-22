@@ -1,4 +1,3 @@
-import { parseAsArrayOf, parseAsString, useQueryState } from "nuqs";
 import { Link } from "react-router";
 import {
   type Dispatch,
@@ -10,28 +9,14 @@ import {
   useRef,
   useState,
 } from "react";
-import { baseLabel, competitionKey, majorCompetitions } from "../../src/competitions.ts";
+import { baseLabel, competitionKey } from "../../src/competitions.ts";
+import { majorKeys, setTimelineFilters, useTimelineFilters } from "./filters.ts";
 import { formatDay } from "./format.ts";
 import { closestDay, dayKey, useMatches, useTeamMatches } from "./matches.ts";
 import { FollowButton, PushHint } from "./FollowButton.tsx";
 import { MatchRow } from "./match-row.tsx";
 
 const MAX_EMPTY_LOADS = 3;
-const majorKeys: string[] = majorCompetitions.map((c) => c.key);
-
-// Major competitions in their curated order, then the rest alphabetically, so the same
-// selection always serializes to the same URL (and the default clears from it).
-function canonical({ keys }: { keys: Iterable<string> }) {
-  const set = new Set(keys);
-  return [
-    ...majorKeys.filter((key) => set.has(key)),
-    ...[...set].filter((key) => !majorKeys.includes(key)).sort(),
-  ];
-}
-
-const compParser = parseAsArrayOf(parseAsString).withDefault(majorKeys);
-const teamParser = parseAsString.withDefault("");
-
 // Extends the loaded window while `ref` is near the viewport. The observer is recreated
 // after each fetch and fires on observe, so weeks that are empty under the current filters
 // keep loading, up to MAX_EMPTY_LOADS in a row.
@@ -128,8 +113,7 @@ export function Timeline() {
   const [now] = useState(() => new Date());
   const [weeksBefore, setWeeksBefore] = useState(3);
   const [weeksAfter, setWeeksAfter] = useState(3);
-  const [comp, setComp] = useQueryState("comp", compParser);
-  const [team, setTeam] = useQueryState("team", teamParser);
+  const { comp, team } = useTimelineFilters();
   const [filtersOpen, setFiltersOpen] = useFiltersOpen();
   const selected = useMemo(() => new Set(comp), [comp]);
   const weekly = useMatches({ now, weeksBefore, weeksAfter });
@@ -238,11 +222,11 @@ export function Timeline() {
     const next = new Set(selected);
     if (next.has(key)) next.delete(key);
     else next.add(key);
-    void setComp(canonical({ keys: next }));
+    setTimelineFilters({ comp: [...next] });
   }
 
   function setAll({ keys }: { keys: string[] }) {
-    void setComp(canonical({ keys }));
+    setTimelineFilters({ comp: keys });
   }
 
   const today = dayKey({ date: now });
@@ -314,7 +298,7 @@ export function Timeline() {
               list="teams"
               value={team}
               placeholder="Any team"
-              onChange={(e) => void setTeam(e.target.value)}
+              onChange={(e) => setTimelineFilters({ team: e.target.value })}
             />
             <datalist id="teams">
               {teams.map((name) => (

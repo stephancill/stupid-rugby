@@ -1,6 +1,5 @@
-import { parseAsString, useQueryState } from "nuqs";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import { baseLabel, currentSeason, findCompetitionByKey } from "../../src/competitions.ts";
 import { useSeason, useSeasons } from "./competition-data.ts";
 import { FollowButton, PushHint } from "./FollowButton.tsx";
@@ -13,7 +12,8 @@ export function CompetitionPage() {
   const { key = "" } = useParams();
   // Fixed at mount so render stays pure.
   const [now] = useState(() => new Date());
-  const [seasonParam, setSeasonParam] = useQueryState("season", parseAsString);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const seasonParam = searchParams.get("season");
   const competition = findCompetitionByKey({ key });
   const seasons = useSeasons({ key });
   const seasonId = seasonParam ?? currentSeason({ seasons: seasons.data ?? [], now })?.id ?? null;
@@ -56,7 +56,15 @@ export function CompetitionPage() {
       {options.length > 0 && (
         <label>
           Season{" "}
-          <select value={seasonId ?? ""} onChange={(e) => void setSeasonParam(e.target.value)}>
+          <select
+            value={seasonId ?? ""}
+            onChange={(e) =>
+              setSearchParams((params) => {
+                params.set("season", e.target.value);
+                return params;
+              })
+            }
+          >
             {options.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.label}

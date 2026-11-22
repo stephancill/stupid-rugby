@@ -1,7 +1,7 @@
 import { useQueries } from "@tanstack/react-query";
-import { parseAsStringLiteral, useQueryState } from "nuqs";
 import { useMemo } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
+import { z } from "zod";
 import { bonusRules, leagueGames } from "../../src/competitions.ts";
 import { liveClock } from "../../src/match-clock.ts";
 import {
@@ -14,10 +14,11 @@ import {
 import type { Standings } from "../../src/standings.ts";
 import type { Match } from "../../src/worldrugby.ts";
 import { fetchMatchSummary } from "./api.ts";
+import { setTimelineFilters } from "./filters.ts";
 import { useNow } from "./now.ts";
 
 // No default: it depends on whether the official table is behind (see StandingsSection).
-const tableParser = parseAsStringLiteral(["official", "live"] as const);
+const tableSchema = z.enum(["official", "live"]);
 
 function LiveNote({ live }: { live: LiveTeam }) {
   const { match, side } = live;
@@ -105,10 +106,13 @@ function StandingsTables({
                   </td>
                   <td className="team-col">
                     <Link
-                      to={{
-                        pathname: "/",
-                        search: `?${new URLSearchParams({ comp: competitionKey, team: teamNames.get(row.team) ?? row.team })}`,
-                      }}
+                      to="/"
+                      onClick={() =>
+                        setTimelineFilters({
+                          comp: [competitionKey],
+                          team: teamNames.get(row.team) ?? row.team,
+                        })
+                      }
                     >
                       {row.team}
                     </Link>
@@ -149,7 +153,14 @@ export function StandingsSection({
   matches: Match[];
   competitionKey: string;
 }) {
-  const [table, setTable] = useQueryState("table", tableParser);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // An unrecognised ?table= falls back to the default, like a missing one.
+  const table = tableSchema.safeParse(searchParams.get("table")).data ?? null;
+  const setTable = (value: z.infer<typeof tableSchema>) =>
+    setSearchParams((params) => {
+      params.set("table", value);
+      return params;
+    });
   const games = leagueGames({ key: competitionKey });
   const liveMatches = useMemo(() => matches.filter((m) => m.phase === "live"), [matches]);
   const unrecorded = useMemo(
@@ -212,7 +223,7 @@ export function StandingsSection({
                 type="radio"
                 name="table"
                 checked={shown === value}
-                onChange={() => void setTable(value)}
+                onChange={() => setTable(value)}
               />
               {value === "official" ? "Official" : "As it stands"}
             </label>

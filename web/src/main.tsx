@@ -27,7 +27,7 @@ const queryClient = new QueryClient({
   },
 });
 
-// Layout wraps every route in nuqs and the live-update subscription.
+// Layout wraps every route in the live-update subscription.
 const router = createBrowserRouter([
   {
     element: <Layout />,
